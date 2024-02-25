@@ -36,6 +36,14 @@ const MAX_PITCH = 90;
 
 const MEASURES = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 
+const capitalizeWords = (text: string): string => {
+  let words = text.split(/ /g);
+  for (let i = 0; i < words.length; i++) {
+    words[i] = words[i][0].toUpperCase() + words[i].slice(1);
+  }
+  return words.join(" ");
+};
+
 type JazzSolo = {
   melid: number;
   trackid: number;
@@ -167,8 +175,15 @@ const TonalGrid: React.FC<{
   );
 };
 
-const makeFileName = ({ title, performer }: JazzSolo) =>
-  performer.replace(/ /g, "") + "_" + title.replace(/ /g, "") + "_Solo.csv";
+const makeFileName = ({ title, performer, solopart }: JazzSolo) =>
+  performer.replace(/\./g, "").replace(/ /g, "") +
+  "_" +
+  capitalizeWords(title)
+    .replace(/ /g, "")
+    .replace(/-/g, "=")
+    .replace(/'n/g, "'N") +
+  (solopart > 1 ? `-${solopart}` : "") +
+  "_Solo.csv";
 
 const CsvLoader: React.FC<{
   filePath: string;
