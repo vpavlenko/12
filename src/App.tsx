@@ -28,29 +28,37 @@ type JazzSolo = {
   genre: string;
 };
 
-const makeCsvMelodyFileName = ({ title, performer }: JazzSolo) =>
+const makeFileName = ({ title, performer }: JazzSolo) =>
   performer.replace(/ /g, "") + "_" + title.replace(/ /g, "") + "_Solo.csv";
 
-const CsvMelodyLoader: React.FC<{ fileName: string }> = ({ fileName }) => {
+const CsvLoader: React.FC<{ filePath: string }> = ({ filePath }) => {
   const [data, setData] = useState<Array<any>>([]);
 
   useEffect(() => {
-    const filePath = `csv_melody/${fileName}`;
-
     fetch(filePath)
       .then((response) => response.text())
       .then((csvText) => {
         Papa.parse(csvText, {
-          complete: (result: any) => {
+          complete: (result) => {
             setData(result.data);
           },
           header: true,
         });
       })
       .catch((error) => console.error("Error loading the CSV file:", error));
-  }, [fileName]);
+  }, [filePath]);
 
-  return <div>{JSON.stringify(data)}</div>;
+  return (
+    <div style={{ fontSize: "10px" }}>
+      <div>
+        <b>{filePath}</b>
+      </div>
+      :{" "}
+      {data.map((line) => (
+        <div>{JSON.stringify(line)}</div>
+      ))}
+    </div>
+  );
 };
 
 const solos: JazzSolo[] = data;
@@ -59,17 +67,30 @@ function App() {
   const [selectedSolo, setSelectedSolo] = useState(0);
   return (
     <>
-      {solos.map(({ title }, index) => (
-        <>
-          <span onClick={() => setSelectedSolo(index)}>{title}</span>{" "}
-        </>
-      ))}
       <div>
+        {solos.map(({ title }, index) => (
+          <>
+            <span
+              style={
+                index === selectedSolo
+                  ? { fontWeight: 700 }
+                  : { borderBottom: "1px dotted gray" }
+              }
+              onClick={() => setSelectedSolo(index)}
+            >
+              {title}
+            </span>
+            {", "}
+          </>
+        ))}
+      </div>
+      <div style={{ marginTop: "40px" }}>
         Selected: {solos[selectedSolo].title} {solos[selectedSolo].performer}{" "}
         {solos[selectedSolo].key} {solos[selectedSolo].chord_changes}{" "}
         {solos[selectedSolo].style}
       </div>
-      <CsvMelodyLoader fileName={makeCsvMelodyFileName(solos[selectedSolo])} />
+      <CsvLoader filePath={`csv_melody/${makeFileName(solos[selectedSolo])}`} />
+      <CsvLoader filePath={`csv_beats/${makeFileName(solos[selectedSolo])}`} />
     </>
   );
 }
