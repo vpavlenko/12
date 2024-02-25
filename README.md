@@ -1,3 +1,6 @@
+<img src="https://github.com/vpavlenko/12/assets/1491908/b02f2946-16be-4b79-a081-0e4cdd9b0122" width="300" />
+
+
 # 12
 
 ```sql
