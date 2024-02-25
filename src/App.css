@@ -4,3 +4,79 @@
   padding: 2rem;
   text-align: center; */
 }
+
+.noteColor_0_colors {
+  background-color: red;
+}
+
+.noteColor_1_colors {
+  background-color: rgb(130, 0, 0);
+  box-shadow: 0 0 3px maroon, 0 0 6px maroon;
+}
+
+.noteColor_1_colors:after, .noteColor_1_shapes:after {
+  content: ''; /* Required for :after to work */
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px; /* Size of the dot */
+  height: 2px; /* Size of the dot */
+  background-color: white; /* Color of the dot */
+  border-radius: 50%; /* Makes the dot circular */
+  transform: translate(-50%, -50%); /* Centers the dot */
+}
+
+.noteColor_2_colors {
+  background-color: #fa71da;
+}
+
+.noteColor_3_colors {
+  background-color: #fffd37;
+}
+
+.noteColor_4_colors {
+  background-color: #00ff59;
+  box-shadow: 0 0 3px #00ff59, 0 0 6px #00ff59;
+}
+
+.noteColor_5_colors {
+  background-color:  #00d5ff;
+}
+
+.noteColor_6_colors {
+  background-color: gray;
+  box-shadow: 0 0 3px gray, 0 0 6px gray;
+}
+
+.noteColor_7_colors {
+  background-color: rgb(12, 12, 252);
+}
+
+.noteColor_8_colors {
+  background-color: #fe6412;
+}
+
+.noteColor_9_colors {
+  background-color: #007000;
+}
+
+.noteColor_9_colors:after, .noteColor_5_colors:after, .noteColor_8_colors:after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 1px;
+  background-color: black;
+  transform: translate(-50%, -50%);
+}
+
+.noteColor_10_colors {
+  background-color: #925601;
+  box-shadow: 0 0 3px #925601, 0 0 6px #925601;
+}
+
+.noteColor_11_colors {
+  background-color: #a000ff;
+  box-shadow: 0 0 3px #a000ff, 0 0 6px #a000ff;
+}

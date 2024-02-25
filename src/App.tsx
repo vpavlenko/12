@@ -4,6 +4,8 @@ import "./App.css";
 import data from "../data/wjd_maj_blues.json";
 import Papa from "papaparse";
 
+const KEYS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+
 const VerticalBar = styled.div`
   width: 1px;
   height: 100%;
@@ -92,10 +94,12 @@ const Measure: React.FC<{ number: number; left: number }> = ({
   </>
 );
 
-const TonalGrid: React.FC<{ choruses: Note[]; beats: BeatsItem[] }> = ({
-  choruses,
-  beats,
-}) => {
+const TonalGrid: React.FC<{
+  choruses: Note[];
+  beats: BeatsItem[];
+  key_: string;
+}> = ({ choruses, beats, key_ }) => {
+  const tonic = key_ ? KEYS.indexOf(key_.split("-")[0]) : 0;
   return (
     <div
       style={{
@@ -110,13 +114,14 @@ const TonalGrid: React.FC<{ choruses: Note[]; beats: BeatsItem[] }> = ({
       ))}
       {choruses.map(({ pitch, onset, duration }) => (
         <div
+          className={`noteColor_${(pitch - tonic) % 12}_colors`}
           style={{
             position: "absolute",
             width: duration * MEASURE_WIDTH,
             height: NOTE_HEIGHT,
             top: (MAX_PITCH - pitch - 1) * NOTE_HEIGHT,
             left: onset * MEASURE_WIDTH,
-            backgroundColor: "red",
+            // backgroundColor: "red",
           }}
         />
       ))}
@@ -240,16 +245,26 @@ function App() {
       </div>
       <div style={{ marginTop: "40px" }}>
         A {solos[selectedSolo].style.toLowerCase()} solo on
-        <span style={{ color: "blue" }}>
+        <span style={{ color: "darkorange" }}>
           "{solos[selectedSolo].title}"
-        </span> by{" "}
+        </span>{" "}
+        by{" "}
         <span style={{ color: "darkgreen" }}>
           {solos[selectedSolo].performer}
         </span>{" "}
-        in {solos[selectedSolo].key}, changes:{" "}
-        {solos[selectedSolo].chord_changes}{" "}
+        in {solos[selectedSolo].key},{" "}
+        <a
+          href={`http://mir.audiolabs.uni-erlangen.de/jazztube/solos/solo/${solos[selectedSolo].melid}`}
+          target="_blank"
+        >
+          listen to on JazzTube
+        </a>
       </div>
-      <TonalGrid choruses={choruses} beats={beatsData} />
+      <TonalGrid
+        choruses={choruses}
+        beats={beatsData}
+        key_={solos[selectedSolo].key}
+      />
       <CsvLoader
         filePath={`csv_melody/${makeFileName(solos[selectedSolo])}`}
         setData={setMelodyData}
