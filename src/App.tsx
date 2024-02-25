@@ -46,9 +46,9 @@ const MeasureBar = styled(VerticalBar)`
   background-color: #444;
 `;
 
-// const BeatBar = styled(VerticalBar)`
-//   border-left: 1px dashed #262626;
-// `;
+const BeatBar = styled(VerticalBar)`
+  border-left: 1px dashed #262626;
+`;
 
 const BEAT_WIDTH = 25;
 const MEASURE_WIDTH = BEAT_WIDTH * 4;
@@ -116,6 +116,9 @@ const Measure: FC<{ number: number; left: number }> = ({ number, left }) => (
     <MeasureBar
       style={{ left, ...(number % 4 === 1 ? { backgroundColor: "#aaa" } : {}) }}
     />
+    {[1, 2, 3].map((beat) => (
+      <BeatBar style={{ left: left + beat * BEAT_WIDTH }} />
+    ))}
     <div
       style={{ position: "absolute", left: left + 10, top: 20, color: "white" }}
     >
@@ -160,23 +163,20 @@ const TonalGrid: FC<{
         backgroundColor: "black",
       }}
     >
-      {currentYoutubeTime !== -10 && currentYoutubeTime != null && (
-        <>
-          <div
-            style={{ position: "absolute", bottom: 0, left: 0, color: "white" }}
-          >
-            {currentYoutubeTime}
-          </div>
+      {currentYoutubeTime !== -10 &&
+        currentYoutubeTime != null &&
+        !isNaN(currentYoutubeTime) && (
           <Cursor style={{ left: currentYoutubeTime * MEASURE_WIDTH }} />
-        </>
-      )}
+        )}
       {octaves}
       {MEASURES.map((number, index) => (
-        <Measure
-          key={number}
-          number={number}
-          left={index * MEASURE_WIDTH - 1}
-        />
+        <>
+          <Measure
+            key={number}
+            number={number}
+            left={index * MEASURE_WIDTH - 1}
+          />
+        </>
       ))}
       {choruses.map(({ pitch, onset, duration }, index) =>
         isNaN(pitch) ? null : (
@@ -315,18 +315,6 @@ function App() {
     () => setChoruses(dataToChoruses(melodyData, mapToRelativeTime)),
     [melodyData, beatsData, mapToRelativeTime]
   );
-
-  // useEffect(() => {
-  //   const interval = setInterval(() => {
-  //     const time = playerRef?.current?.getCurrentTime();
-  //     if (typeof time == "number") {
-  //       console.log(time, youtubeItem);
-  //       setCurrentYoutubeTime(time - parseFloat(youtubeItem.solo_start_sec));
-  //     }
-  //   }, 100);
-
-  //   return () => clearInterval(interval);
-  // }, [youtubeItem]);
 
   useEffect(() => {
     function updateCurrentTime() {
