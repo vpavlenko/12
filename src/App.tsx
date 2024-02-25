@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { FC, Fragment, useEffect, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
 import "./App.css";
 import data from "../data/wjd_maj_blues.json";
 import jazztubeData from "../data/jazztube.json";
 import Papa from "papaparse";
-import YouTube from "react-youtube";
+import YouTube, { YouTubePlayer } from "react-youtube";
 
 const KEYS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 
@@ -36,10 +36,11 @@ const VerticalBar = styled.div`
   pointer-events: none;
 `;
 
-// const Cursor = styled(VerticalBar)`
-//   background-color: orange;
-//   pointer-events: none;
-// `;
+const Cursor = styled(VerticalBar)`
+  background-color: orange;
+  pointer-events: none;
+  z-index: 1;
+`;
 
 const MeasureBar = styled(VerticalBar)`
   background-color: #444;
@@ -110,10 +111,7 @@ type Note = {
   pitch: number;
 };
 
-const Measure: React.FC<{ number: number; left: number }> = ({
-  number,
-  left,
-}) => (
+const Measure: FC<{ number: number; left: number }> = ({ number, left }) => (
   <>
     <MeasureBar
       style={{ left, ...(number % 4 === 1 ? { backgroundColor: "#aaa" } : {}) }}
@@ -126,11 +124,12 @@ const Measure: React.FC<{ number: number; left: number }> = ({
   </>
 );
 
-const TonalGrid: React.FC<{
+const TonalGrid: FC<{
   choruses: Note[];
   beats: BeatsItem[];
   key_: string;
-}> = ({ choruses, beats, key_ }) => {
+  currentYoutubeTime: number;
+}> = ({ choruses, beats, key_, currentYoutubeTime }) => {
   const tonic = key_ ? KEYS.indexOf(key_.split("-")[0]) : 0;
   const octaves = [];
   for (let octave = 0; octave <= 9; ++octave) {
@@ -161,27 +160,45 @@ const TonalGrid: React.FC<{
         backgroundColor: "black",
       }}
     >
+      {currentYoutubeTime !== -10 && currentYoutubeTime != null && (
+        <>
+          <div
+            style={{ position: "absolute", bottom: 0, left: 0, color: "white" }}
+          >
+            {currentYoutubeTime}
+          </div>
+          <Cursor style={{ left: currentYoutubeTime * MEASURE_WIDTH }} />
+        </>
+      )}
       {octaves}
       {MEASURES.map((number, index) => (
-        <Measure number={number} left={index * MEASURE_WIDTH - 1} />
-      ))}
-      {choruses.map(({ pitch, onset, duration }) => (
-        <div
-          className={`noteColor_${(pitch - tonic) % 12}_colors`}
-          style={{
-            position: "absolute",
-            width: duration * MEASURE_WIDTH,
-            height: NOTE_HEIGHT,
-            top: (MAX_PITCH - pitch - 1) * NOTE_HEIGHT,
-            left: onset * MEASURE_WIDTH,
-            // backgroundColor: "red",
-          }}
+        <Measure
+          key={number}
+          number={number}
+          left={index * MEASURE_WIDTH - 1}
         />
       ))}
+      {choruses.map(({ pitch, onset, duration }, index) =>
+        isNaN(pitch) ? null : (
+          <div
+            key={index}
+            className={`noteColor_${(pitch - tonic) % 12}_colors`}
+            style={{
+              position: "absolute",
+              width: duration * MEASURE_WIDTH,
+              height: NOTE_HEIGHT,
+              top: (MAX_PITCH - pitch - 1) * NOTE_HEIGHT,
+              left: onset * MEASURE_WIDTH,
+              zIndex: 10,
+            }}
+          />
+        )
+      )}
       {beats
         .filter(({ chord }) => chord)
-        .map(({ bar, beat, chord }) => (
+        .map(({ bar, beat, chord }, index) => (
           <div
+            key={index}
             style={{
               position: "absolute",
               left:
@@ -207,7 +224,7 @@ const makeFileName = ({ title, performer, solopart }: JazzSolo) =>
   (solopart > 1 ? `-${solopart}` : "") +
   "_Solo.csv";
 
-const CsvLoader: React.FC<{
+const CsvLoader: FC<{
   filePath: string;
   setData: (data: any) => void;
 }> = ({ filePath, setData }) => {
@@ -233,8 +250,8 @@ const CsvLoader: React.FC<{
       <div>
         <b>{filePath}</b>
       </div>
-      {data.map((line) => (
-        <div>{JSON.stringify(line)}</div>
+      {data.map((line, index) => (
+        <div key={index}>{JSON.stringify(line)}</div>
       ))}
     </div>
   );
@@ -244,25 +261,8 @@ const solos: JazzSolo[] = data;
 
 const dataToChoruses = (
   melodyData: MelodyItem[],
-  beatsData: BeatsItem[]
+  mapToRelativeTime: (time: number) => number
 ): Note[] => {
-  const barOnsets: { [key: number]: number } = {};
-  beatsData.forEach(({ bar, beat, onset }) => {
-    if (beat == "1") {
-      barOnsets[parseInt(bar, 10)] = parseFloat(onset);
-    }
-  });
-  const mapToRelativeTime = (absoluteTime: number) => {
-    for (let i = -1; i <= 14; ++i) {
-      if (absoluteTime < barOnsets[i]) {
-        return (
-          i +
-          (absoluteTime - barOnsets[i - 1]) / (barOnsets[i] - barOnsets[i - 1])
-        );
-      }
-    }
-    return -10;
-  };
   return melodyData.map(({ duration, onset, pitch }) => ({
     duration:
       mapToRelativeTime(parseFloat(onset) + parseFloat(duration)) -
@@ -278,19 +278,75 @@ function App() {
   const [beatsData, setBeatsData] = useState<BeatsItem[]>([]);
   const [youtubeId, setYoutubeId] = useState<string | null>(null);
   const [choruses, setChoruses] = useState<Note[]>([]);
-
-  useEffect(
-    () => setChoruses(dataToChoruses(melodyData, beatsData)),
-    [melodyData, beatsData]
-  );
+  const [currentYoutubeTime, setCurrentYoutubeTime] = useState<number>(0);
+  const playerRef = useRef<YouTubePlayer>();
 
   const { style, title, performer, key, melid } = solos[selectedSolo];
+
+  const youtubeItem = useMemo(() => {
+    return youtubeVideos[melid].filter(
+      ({ youtube_id }) => youtubeId === youtube_id
+    )[0];
+  }, [melid, youtubeId]);
+
+  const mapToRelativeTime = useMemo(() => {
+    const barOnsets: { [key: number]: number } = {};
+    beatsData.forEach(({ bar, beat, onset }) => {
+      if (beat == "1") {
+        barOnsets[parseInt(bar, 10)] = parseFloat(onset);
+      }
+    });
+    return (absoluteTime: number) => {
+      for (let i = -1; i <= 14; ++i) {
+        if (absoluteTime < barOnsets[i]) {
+          return (
+            i +
+            (absoluteTime - barOnsets[i - 1]) /
+              (barOnsets[i] - barOnsets[i - 1])
+          );
+        }
+      }
+      console.log(absoluteTime, barOnsets);
+      return -10;
+    };
+  }, [beatsData]);
+
+  useEffect(
+    () => setChoruses(dataToChoruses(melodyData, mapToRelativeTime)),
+    [melodyData, beatsData, mapToRelativeTime]
+  );
+
+  // useEffect(() => {
+  //   const interval = setInterval(() => {
+  //     const time = playerRef?.current?.getCurrentTime();
+  //     if (typeof time == "number") {
+  //       console.log(time, youtubeItem);
+  //       setCurrentYoutubeTime(time - parseFloat(youtubeItem.solo_start_sec));
+  //     }
+  //   }, 100);
+
+  //   return () => clearInterval(interval);
+  // }, [youtubeItem]);
+
+  useEffect(() => {
+    function updateCurrentTime() {
+      const time = playerRef?.current?.getCurrentTime();
+      if (typeof time === "number") {
+        setCurrentYoutubeTime(time - parseFloat(youtubeItem.solo_start_sec));
+      }
+      requestAnimationFrame(updateCurrentTime);
+    }
+
+    const animationFrameId = requestAnimationFrame(updateCurrentTime);
+
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [youtubeItem]);
 
   return (
     <>
       <div>
         {solos.map(({ title }, index) => (
-          <>
+          <Fragment key={index}>
             <span
               style={
                 index === selectedSolo
@@ -305,7 +361,7 @@ function App() {
               {title}
             </span>
             {", "}
-          </>
+          </Fragment>
         ))}
       </div>
       <div style={{ marginTop: "40px" }}>
@@ -320,7 +376,7 @@ function App() {
         </a>
         .{" "}
         {youtubeVideos[melid]?.map(({ youtube_id }) => (
-          <>
+          <Fragment key={youtube_id}>
             <span
               style={
                 youtubeId === youtube_id
@@ -334,27 +390,25 @@ function App() {
               {youtube_id}
             </span>
             {", "}
-          </>
+          </Fragment>
         ))}
       </div>
       <TonalGrid
         choruses={choruses}
         beats={beatsData}
         key_={solos[selectedSolo].key}
+        currentYoutubeTime={mapToRelativeTime(currentYoutubeTime + 0.05)}
       />
       {youtubeId && (
         <YouTube
           videoId={youtubeId}
           opts={{
             playerVars: {
-              start: parseFloat(
-                youtubeVideos[melid].filter(
-                  ({ youtube_id }) => youtubeId === youtube_id
-                )[0].solo_start_sec
-              ),
+              start: parseFloat(youtubeItem.solo_start_sec),
               autoplay: 1,
             },
           }}
+          onReady={(event) => (playerRef.current = event.target)}
         />
       )}
       <CsvLoader
