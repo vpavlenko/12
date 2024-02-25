@@ -85,7 +85,9 @@ const Measure: React.FC<{ number: number; left: number }> = ({
   left,
 }) => (
   <>
-    <MeasureBar style={{ left }} />
+    <MeasureBar
+      style={{ left, ...(number % 4 === 1 ? { backgroundColor: "#aaa" } : {}) }}
+    />
     <div
       style={{ position: "absolute", left: left + 10, top: 20, color: "white" }}
     >
@@ -100,6 +102,26 @@ const TonalGrid: React.FC<{
   key_: string;
 }> = ({ choruses, beats, key_ }) => {
   const tonic = key_ ? KEYS.indexOf(key_.split("-")[0]) : 0;
+  const octaves = [];
+  for (let octave = 0; octave <= 9; ++octave) {
+    const midiNumber = tonic + octave * 12;
+    if (midiNumber >= MIN_PITCH && midiNumber + 4 <= MAX_PITCH)
+      octaves.push(
+        <div
+          key={`tonalgrid_octave_${midiNumber}`}
+          style={{
+            position: "absolute",
+            width: "100%",
+            height: 6 * NOTE_HEIGHT,
+            left: 0,
+            top: (MAX_PITCH - midiNumber - 6) * NOTE_HEIGHT,
+            pointerEvents: "none",
+            background: `linear-gradient(to top, #222, transparent)`,
+            zIndex: 0,
+          }}
+        />
+      );
+  }
   return (
     <div
       style={{
@@ -109,8 +131,9 @@ const TonalGrid: React.FC<{
         backgroundColor: "black",
       }}
     >
+      {octaves}
       {MEASURES.map((number, index) => (
-        <Measure number={number} left={index * MEASURE_WIDTH} />
+        <Measure number={number} left={index * MEASURE_WIDTH - 1} />
       ))}
       {choruses.map(({ pitch, onset, duration }) => (
         <div
