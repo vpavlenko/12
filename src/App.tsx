@@ -2,9 +2,31 @@ import { useEffect, useState } from "react";
 import styled from "styled-components";
 import "./App.css";
 import data from "../data/wjd_maj_blues.json";
+import jazztubeData from "../data/jazztube.json";
 import Papa from "papaparse";
+import YouTube from "react-youtube";
 
 const KEYS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+
+type YoutubeEntry = {
+  index: string;
+  db: string;
+  melid: string;
+  mf_median: string;
+  mf_min: string;
+  query: string;
+  solo_end_sec: string;
+  solo_start_sec: string;
+  wp_end_idx: string;
+  wp_start_idx: string;
+  youtube_id: string;
+};
+
+type YoutubeEntries = {
+  [key: string]: YoutubeEntry[];
+};
+
+const youtubeVideos: YoutubeEntries = jazztubeData;
 
 const VerticalBar = styled.div`
   width: 1px;
@@ -254,13 +276,15 @@ function App() {
   const [selectedSolo, setSelectedSolo] = useState(8);
   const [melodyData, setMelodyData] = useState<MelodyItem[]>([]);
   const [beatsData, setBeatsData] = useState<BeatsItem[]>([]);
-
+  const [youtubeId, setYoutubeId] = useState<string | null>(null);
   const [choruses, setChoruses] = useState<Note[]>([]);
 
   useEffect(
     () => setChoruses(dataToChoruses(melodyData, beatsData)),
     [melodyData, beatsData]
   );
+
+  const { style, title, performer, key, melid } = solos[selectedSolo];
 
   return (
     <>
@@ -273,7 +297,10 @@ function App() {
                   ? { fontWeight: 700 }
                   : { borderBottom: "1px dotted gray" }
               }
-              onClick={() => setSelectedSolo(index)}
+              onClick={() => {
+                setSelectedSolo(index);
+                setYoutubeId(null);
+              }}
             >
               {title}
             </span>
@@ -282,27 +309,54 @@ function App() {
         ))}
       </div>
       <div style={{ marginTop: "40px" }}>
-        A {solos[selectedSolo].style.toLowerCase()} solo on
-        <span style={{ color: "darkorange" }}>
-          "{solos[selectedSolo].title}"
-        </span>{" "}
-        by{" "}
-        <span style={{ color: "darkgreen" }}>
-          {solos[selectedSolo].performer}
-        </span>{" "}
-        in {solos[selectedSolo].key},{" "}
+        A {style.toLowerCase()} solo on
+        <span style={{ color: "darkorange" }}>"{title}"</span> by{" "}
+        <span style={{ color: "darkgreen" }}>{performer}</span> in {key},{" "}
         <a
-          href={`http://mir.audiolabs.uni-erlangen.de/jazztube/solos/solo/${solos[selectedSolo].melid}`}
+          href={`http://mir.audiolabs.uni-erlangen.de/jazztube/solos/solo/${melid}`}
           target="_blank"
         >
           listen to on JazzTube
         </a>
+        .{" "}
+        {youtubeVideos[melid]?.map(({ youtube_id }) => (
+          <>
+            <span
+              style={
+                youtubeId === youtube_id
+                  ? { fontWeight: 700 }
+                  : { borderBottom: "1px dotted gray" }
+              }
+              onClick={() => {
+                setYoutubeId(youtube_id);
+              }}
+            >
+              {youtube_id}
+            </span>
+            {", "}
+          </>
+        ))}
       </div>
       <TonalGrid
         choruses={choruses}
         beats={beatsData}
         key_={solos[selectedSolo].key}
       />
+      {youtubeId && (
+        <YouTube
+          videoId={youtubeId}
+          opts={{
+            playerVars: {
+              start: parseFloat(
+                youtubeVideos[melid].filter(
+                  ({ youtube_id }) => youtubeId === youtube_id
+                )[0].solo_start_sec
+              ),
+              autoplay: 1,
+            },
+          }}
+        />
+      )}
       <CsvLoader
         filePath={`csv_melody/${makeFileName(solos[selectedSolo])}`}
         setData={setMelodyData}
