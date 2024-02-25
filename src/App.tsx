@@ -69,6 +69,7 @@ type BeatsItem = {
   bar: string;
   beat: string;
   onset: string;
+  chord: string;
 };
 
 type Note = {
@@ -83,19 +84,25 @@ const Measure: React.FC<{ number: number; left: number }> = ({
 }) => (
   <>
     <MeasureBar style={{ left }} />
-    <div style={{ position: "absolute", left: left + 28, top: 20 }}>
+    <div
+      style={{ position: "absolute", left: left + 10, top: 20, color: "white" }}
+    >
       {number}
     </div>
   </>
 );
 
-const TonalGrid: React.FC<{ choruses: Note[] }> = ({ choruses }) => {
+const TonalGrid: React.FC<{ choruses: Note[]; beats: BeatsItem[] }> = ({
+  choruses,
+  beats,
+}) => {
   return (
     <div
       style={{
         position: "relative",
         width: MEASURES.length * MEASURE_WIDTH,
         height: (MAX_PITCH - MIN_PITCH + 1) * NOTE_HEIGHT,
+        backgroundColor: "black",
       }}
     >
       {MEASURES.map((number, index) => (
@@ -106,14 +113,28 @@ const TonalGrid: React.FC<{ choruses: Note[] }> = ({ choruses }) => {
           style={{
             position: "absolute",
             width: duration * MEASURE_WIDTH,
+            height: NOTE_HEIGHT,
             top: (MAX_PITCH - pitch - 1) * NOTE_HEIGHT,
             left: onset * MEASURE_WIDTH,
             backgroundColor: "red",
           }}
-        >
-          {pitch}
-        </div>
+        />
       ))}
+      {beats
+        .filter(({ chord }) => chord)
+        .map(({ bar, beat, chord }) => (
+          <div
+            style={{
+              position: "absolute",
+              left:
+                (parseInt(bar, 10) + 1 + (parseInt(beat, 10) - 1) / 4) *
+                MEASURE_WIDTH,
+              color: "yellow",
+            }}
+          >
+            {chord}
+          </div>
+        ))}
     </div>
   );
 };
@@ -187,7 +208,7 @@ const dataToChoruses = (
 };
 
 function App() {
-  const [selectedSolo, setSelectedSolo] = useState(0);
+  const [selectedSolo, setSelectedSolo] = useState(8);
   const [melodyData, setMelodyData] = useState<MelodyItem[]>([]);
   const [beatsData, setBeatsData] = useState<BeatsItem[]>([]);
 
@@ -218,11 +239,17 @@ function App() {
         ))}
       </div>
       <div style={{ marginTop: "40px" }}>
-        Selected: {solos[selectedSolo].title} {solos[selectedSolo].performer}{" "}
-        {solos[selectedSolo].key} {solos[selectedSolo].chord_changes}{" "}
-        {solos[selectedSolo].style}
+        A {solos[selectedSolo].style.toLowerCase()} solo on
+        <span style={{ color: "blue" }}>
+          "{solos[selectedSolo].title}"
+        </span> by{" "}
+        <span style={{ color: "darkgreen" }}>
+          {solos[selectedSolo].performer}
+        </span>{" "}
+        in {solos[selectedSolo].key}, changes:{" "}
+        {solos[selectedSolo].chord_changes}{" "}
       </div>
-      <TonalGrid choruses={choruses} />
+      <TonalGrid choruses={choruses} beats={beatsData} />
       <CsvLoader
         filePath={`csv_melody/${makeFileName(solos[selectedSolo])}`}
         setData={setMelodyData}
