@@ -284,9 +284,9 @@ function App() {
   const { style, title, performer, key, melid } = solos[selectedSolo];
 
   const youtubeItem = useMemo(() => {
-    return youtubeVideos[melid].filter(
+    return youtubeVideos[melid]?.filter(
       ({ youtube_id }) => youtubeId === youtube_id
-    )[0];
+    )?.[0];
   }, [melid, youtubeId]);
 
   const mapToRelativeTime = useMemo(() => {
