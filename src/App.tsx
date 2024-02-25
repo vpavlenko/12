@@ -1,7 +1,38 @@
 import { useEffect, useState } from "react";
+import styled from "styled-components";
 import "./App.css";
 import data from "../data/wjd_maj_blues.json";
 import Papa from "papaparse";
+
+const VerticalBar = styled.div`
+  width: 1px;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+`;
+
+// const Cursor = styled(VerticalBar)`
+//   background-color: orange;
+//   pointer-events: none;
+// `;
+
+const MeasureBar = styled(VerticalBar)`
+  background-color: #444;
+`;
+
+// const BeatBar = styled(VerticalBar)`
+//   border-left: 1px dashed #262626;
+// `;
+
+const BEAT_WIDTH = 25;
+const MEASURE_WIDTH = BEAT_WIDTH * 4;
+const NOTE_HEIGHT = 10;
+
+const MIN_PITCH = 40;
+const MAX_PITCH = 90;
+
+const MEASURES = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 
 type JazzSolo = {
   melid: number;
@@ -28,19 +59,82 @@ type JazzSolo = {
   genre: string;
 };
 
+type MelodyItem = {
+  onset: string;
+  duration: string;
+  pitch: string;
+};
+
+type BeatsItem = {
+  bar: string;
+  beat: string;
+  onset: string;
+};
+
+type Note = {
+  onset: number;
+  duration: number;
+  pitch: number;
+};
+
+const Measure: React.FC<{ number: number; left: number }> = ({
+  number,
+  left,
+}) => (
+  <>
+    <MeasureBar style={{ left }} />
+    <div style={{ position: "absolute", left: left + 28, top: 20 }}>
+      {number}
+    </div>
+  </>
+);
+
+const TonalGrid: React.FC<{ choruses: Note[] }> = ({ choruses }) => {
+  return (
+    <div
+      style={{
+        position: "relative",
+        width: MEASURES.length * MEASURE_WIDTH,
+        height: (MAX_PITCH - MIN_PITCH + 1) * NOTE_HEIGHT,
+      }}
+    >
+      {MEASURES.map((number, index) => (
+        <Measure number={number} left={index * MEASURE_WIDTH} />
+      ))}
+      {choruses.map(({ pitch, onset, duration }) => (
+        <div
+          style={{
+            position: "absolute",
+            width: duration * MEASURE_WIDTH,
+            top: (MAX_PITCH - pitch - 1) * NOTE_HEIGHT,
+            left: onset * MEASURE_WIDTH,
+            backgroundColor: "red",
+          }}
+        >
+          {pitch}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const makeFileName = ({ title, performer }: JazzSolo) =>
   performer.replace(/ /g, "") + "_" + title.replace(/ /g, "") + "_Solo.csv";
 
-const CsvLoader: React.FC<{ filePath: string }> = ({ filePath }) => {
-  const [data, setData] = useState<Array<any>>([]);
+const CsvLoader: React.FC<{
+  filePath: string;
+  setData: (data: any) => void;
+}> = ({ filePath, setData }) => {
+  const [data, innerSetData] = useState<Array<any>>([]);
 
   useEffect(() => {
     fetch(filePath)
       .then((response) => response.text())
       .then((csvText) => {
         Papa.parse(csvText, {
-          complete: (result) => {
-            setData(result.data);
+          complete: ({ data }) => {
+            innerSetData(data);
+            setData(data);
           },
           header: true,
         });
@@ -53,7 +147,6 @@ const CsvLoader: React.FC<{ filePath: string }> = ({ filePath }) => {
       <div>
         <b>{filePath}</b>
       </div>
-      :{" "}
       {data.map((line) => (
         <div>{JSON.stringify(line)}</div>
       ))}
@@ -63,8 +156,48 @@ const CsvLoader: React.FC<{ filePath: string }> = ({ filePath }) => {
 
 const solos: JazzSolo[] = data;
 
+const dataToChoruses = (
+  melodyData: MelodyItem[],
+  beatsData: BeatsItem[]
+): Note[] => {
+  const barOnsets: { [key: number]: number } = {};
+  beatsData.forEach(({ bar, beat, onset }) => {
+    if (beat == "1") {
+      barOnsets[parseInt(bar, 10)] = parseFloat(onset);
+    }
+  });
+  const mapToRelativeTime = (absoluteTime: number) => {
+    for (let i = -1; i <= 14; ++i) {
+      if (absoluteTime < barOnsets[i]) {
+        return (
+          i +
+          (absoluteTime - barOnsets[i - 1]) / (barOnsets[i] - barOnsets[i - 1])
+        );
+      }
+    }
+    return -10;
+  };
+  return melodyData.map(({ duration, onset, pitch }) => ({
+    duration:
+      mapToRelativeTime(parseFloat(onset) + parseFloat(duration)) -
+      mapToRelativeTime(parseFloat(onset)),
+    onset: mapToRelativeTime(parseFloat(onset)),
+    pitch: parseFloat(pitch),
+  }));
+};
+
 function App() {
   const [selectedSolo, setSelectedSolo] = useState(0);
+  const [melodyData, setMelodyData] = useState<MelodyItem[]>([]);
+  const [beatsData, setBeatsData] = useState<BeatsItem[]>([]);
+
+  const [choruses, setChoruses] = useState<Note[]>([]);
+
+  useEffect(
+    () => setChoruses(dataToChoruses(melodyData, beatsData)),
+    [melodyData, beatsData]
+  );
+
   return (
     <>
       <div>
@@ -89,8 +222,15 @@ function App() {
         {solos[selectedSolo].key} {solos[selectedSolo].chord_changes}{" "}
         {solos[selectedSolo].style}
       </div>
-      <CsvLoader filePath={`csv_melody/${makeFileName(solos[selectedSolo])}`} />
-      <CsvLoader filePath={`csv_beats/${makeFileName(solos[selectedSolo])}`} />
+      <TonalGrid choruses={choruses} />
+      <CsvLoader
+        filePath={`csv_melody/${makeFileName(solos[selectedSolo])}`}
+        setData={setMelodyData}
+      />
+      <CsvLoader
+        filePath={`csv_beats/${makeFileName(solos[selectedSolo])}`}
+        setData={setBeatsData}
+      />
     </>
   );
 }
