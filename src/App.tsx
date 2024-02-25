@@ -8,6 +8,28 @@ import YouTube, { YouTubePlayer } from "react-youtube";
 
 const KEYS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 
+const STYLES = {
+  TRADITIONAL: "1910..30s",
+  SWING: "1930..40s",
+  BEBOP: "1940..50s",
+  COOL: "1950..60s",
+  HARDBOP: "1950..60s",
+  POSTBOP: "1960..70s",
+};
+
+const INSTRUMENTS = {
+  as: "alto saxophone",
+  bcl: "bass clarinet",
+  bs: "baritone saxophone",
+  cor: "cornet",
+  g: "guitar",
+  ss: "soprano saxophone",
+  tb: "trombone",
+  tp: "trumpet",
+  ts: "tenor saxophone",
+  vib: "vibraphone",
+};
+
 type YoutubeEntry = {
   index: string;
   db: string;
@@ -273,7 +295,7 @@ const dataToChoruses = (
 };
 
 function App() {
-  const [selectedSolo, setSelectedSolo] = useState(8);
+  const [selectedSolo, setSelectedSolo] = useState(1);
   const [melodyData, setMelodyData] = useState<MelodyItem[]>([]);
   const [beatsData, setBeatsData] = useState<BeatsItem[]>([]);
   const [youtubeId, setYoutubeId] = useState<string | null>(null);
@@ -281,7 +303,8 @@ function App() {
   const [currentYoutubeTime, setCurrentYoutubeTime] = useState<number>(0);
   const playerRef = useRef<YouTubePlayer>();
 
-  const { style, title, performer, key, melid } = solos[selectedSolo];
+  const { style, title, performer, key, instrument, melid } =
+    solos[selectedSolo];
 
   const youtubeItem = useMemo(() => {
     return youtubeVideos[melid]?.filter(
@@ -332,30 +355,40 @@ function App() {
 
   return (
     <>
-      <div>
-        {solos.map(({ title }, index) => (
-          <Fragment key={index}>
-            <span
-              style={
-                index === selectedSolo
-                  ? { fontWeight: 700 }
-                  : { borderBottom: "1px dotted gray" }
-              }
-              onClick={() => {
-                setSelectedSolo(index);
-                setYoutubeId(null);
-              }}
-            >
-              {title}
-            </span>
-            {", "}
-          </Fragment>
-        ))}
-      </div>
+      {Object.entries(STYLES).map(([style_, years]) => (
+        <div key={style_}>
+          <b>
+            {style_.toLowerCase()}, {years}:{" "}
+          </b>
+          {solos.map(
+            ({ title, style }, index) =>
+              style === style_ && (
+                <Fragment key={index}>
+                  <span
+                    style={
+                      index === selectedSolo
+                        ? { fontWeight: 700 }
+                        : { cursor: "pointer" }
+                    }
+                    onClick={() => {
+                      setSelectedSolo(index);
+                      setYoutubeId(null);
+                    }}
+                  >
+                    {title}
+                  </span>
+                  {", "}
+                </Fragment>
+              )
+          )}
+        </div>
+      ))}
       <div style={{ marginTop: "40px" }}>
-        A {style.toLowerCase()} solo on
-        <span style={{ color: "darkorange" }}>"{title}"</span> by{" "}
-        <span style={{ color: "darkgreen" }}>{performer}</span> in {key},{" "}
+        A {style.toLowerCase()} solo on{" "}
+        <span style={{ color: "darkorange", fontWeight: 700 }}>"{title}"</span>{" "}
+        by{" "}
+        <span style={{ color: "darkgreen", fontWeight: 700 }}>{performer}</span>{" "}
+        ({INSTRUMENTS[instrument as keyof typeof INSTRUMENTS]}) in {key},{" "}
         <a
           href={`http://mir.audiolabs.uni-erlangen.de/jazztube/solos/solo/${melid}`}
           target="_blank"
@@ -369,7 +402,7 @@ function App() {
               style={
                 youtubeId === youtube_id
                   ? { fontWeight: 700 }
-                  : { borderBottom: "1px dotted gray" }
+                  : { borderBottom: "1px dotted gray", cursor: "pointer" }
               }
               onClick={() => {
                 setYoutubeId(youtube_id);
