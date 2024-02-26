@@ -5,6 +5,7 @@ import jazztubeData from "../data/jazztube.json";
 import Papa from "papaparse";
 import YouTube, { YouTubePlayer } from "react-youtube";
 import TonalGrid from "./components/TonalGrid";
+import useLocalStorageSet from "./components/useLocalStorageSet";
 
 const MEASURES = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 
@@ -128,6 +129,7 @@ const CsvLoader: FC<{
             setData(data);
           },
           header: true,
+          dynamicTyping: true,
         });
       })
       .catch((error) => console.error("Error loading the CSV file:", error));
@@ -165,7 +167,8 @@ const MiniMap: FC<{
   key_: string;
   choruses: Note[];
   currentYoutubeTime: number;
-}> = ({ beatsData, key_, choruses, currentYoutubeTime }) => {
+  mapToRelativeTime: (time: number) => number;
+}> = ({ beatsData, key_, choruses, currentYoutubeTime, mapToRelativeTime }) => {
   const startBar = parseInt(beatsData[0]?.bar ?? "0", 10);
   const endBar = parseInt(beatsData.at(-1)?.bar ?? "0", 10);
   console.log(choruses);
@@ -182,6 +185,7 @@ const MiniMap: FC<{
         )}
         measureWidth={30}
         noteHeight={3}
+        mapToRelativeTime={mapToRelativeTime}
       />
     </div>
   );
@@ -194,6 +198,7 @@ function App() {
   const [youtubeId, setYoutubeId] = useState<string | null>(null);
   const [choruses, setChoruses] = useState<Note[]>([]);
   const [currentYoutubeTime, setCurrentYoutubeTime] = useState<number>(0);
+  const [badVideos, addBadVideo] = useLocalStorageSet("badVideos");
   const playerRef = useRef<YouTubePlayer>();
 
   const { style, title, performer, key, instrument, melid } =
@@ -320,19 +325,15 @@ function App() {
         <span style={{ color: "darkorange", fontWeight: 700 }}>"{title}"</span>{" "}
         by{" "}
         <span style={{ color: "darkgreen", fontWeight: 700 }}>{performer}</span>{" "}
-        ({INSTRUMENTS[instrument as keyof typeof INSTRUMENTS]}) in {key},{" "}
-        <a
-          href={`http://mir.audiolabs.uni-erlangen.de/jazztube/solos/solo/${melid}`}
-          target="_blank"
-        >
-          listen to on JazzTube
-        </a>
-        .{" "}
-        {youtubeVideos[melid]?.map(({ youtube_id }) => (
+        ({INSTRUMENTS[instrument as keyof typeof INSTRUMENTS]}) in {key}.
+        Youtube videos:{" "}
+        {youtubeVideos[melid]?.map(({ youtube_id }, index) => (
           <Fragment key={youtube_id}>
             <span
               style={
-                youtubeId === youtube_id
+                badVideos.has(youtube_id)
+                  ? { textDecoration: "line-through" }
+                  : youtubeId === youtube_id
                   ? { fontWeight: 700 }
                   : { borderBottom: "1px dotted gray", cursor: "pointer" }
               }
@@ -363,8 +364,9 @@ function App() {
           { length: endBar - startBar + 1 },
           (_, index) => index + startBar
         )}
+        mapToRelativeTime={mapToRelativeTime}
       />
-      {youtubeId && (
+      {youtubeId && youtubeItem && (
         <YouTube
           videoId={youtubeId}
           opts={{
@@ -374,6 +376,7 @@ function App() {
             },
           }}
           onReady={(event) => (playerRef.current = event.target)}
+          onError={() => addBadVideo(youtubeId)}
         />
       )}
       <CsvLoader

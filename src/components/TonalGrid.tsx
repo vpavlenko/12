@@ -65,6 +65,7 @@ const TonalGrid: FC<{
   measures: number[];
   measureWidth: number;
   noteHeight: number;
+  mapToRelativeTime: (time: number) => number;
 }> = ({
   choruses,
   beats,
@@ -73,6 +74,7 @@ const TonalGrid: FC<{
   measures,
   measureWidth,
   noteHeight,
+  mapToRelativeTime,
 }) => {
   const tonic = key_ ? KEYS.indexOf(key_.split("-")[0]) : 0;
   const octaves = [];
@@ -138,14 +140,14 @@ const TonalGrid: FC<{
       )}
       {beats
         .filter(({ chord }) => chord)
-        .map(({ bar, beat, chord }, index) => (
+        .map(({ onset, chord }, index) => (
           <div
             key={index}
             style={{
               position: "absolute",
               left:
-                (parseInt(bar, 10) + 1 + (parseInt(beat, 10) - 1) / 4) *
-                measureWidth,
+                mapToRelativeTime &&
+                mapToRelativeTime(parseFloat(onset)) * measureWidth,
               color: "yellow",
             }}
           >
