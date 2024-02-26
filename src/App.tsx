@@ -15,6 +15,17 @@ const BAD_VIDEOS = new Set([
   "FferX_P7SVs",
   "zQBjD06a6l8",
   "fBQxsQlPDkU",
+  "lcKQ3wGI8ZQ",
+  "tu4o65SwUIw",
+  "DabNQMNsFJk",
+  "x084gGjWlpY",
+  "tkSrZTEvSkc",
+  "Up4NTq5tkhc",
+  "oxl5L5Wyybk",
+  "74GIncsU9LM",
+  "FeRZPQS0Q98",
+  "xnJl5CXZ82M",
+  "wAMYl6kJkjo",
 ]);
 
 const STYLES = {
