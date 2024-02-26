@@ -7,6 +7,16 @@ import YouTube, { YouTubePlayer } from "react-youtube";
 import TonalGrid from "./components/TonalGrid";
 import useLocalStorageSet from "./components/useLocalStorageSet";
 
+const BAD_VIDEOS = new Set([
+  "RXvA6r_BjWQ",
+  "4LBaCBT2tOs",
+  "1iJdXWY7JRo",
+  "DiNzXslovVk",
+  "FferX_P7SVs",
+  "zQBjD06a6l8",
+  "fBQxsQlPDkU",
+]);
+
 const STYLES = {
   TRADITIONAL: "1910..30s",
   SWING: "1930..40s",
@@ -151,7 +161,7 @@ function App() {
   const [selectedSolo, setSelectedSolo] = useState(1);
   const [melodyData, setMelodyData] = useState<MelodyItem[] | null>(null);
   const [beatsData, setBeatsData] = useState<BeatsItem[] | null>(null);
-  const [youtubeId, setYoutubeId] = useState<string | null>(null);
+  const [youtubeId, setYoutubeId] = useState<string | null>("WvKuTS1mBmU");
   const [currentYoutubeTime, setCurrentYoutubeTime] = useState<number>(0);
   const [badVideos, addBadVideo] = useLocalStorageSet("badVideos");
   const playerRef = useRef<YouTubePlayer>();
@@ -237,7 +247,9 @@ function App() {
                             setSelectedSolo(soloIndex);
                             setYoutubeId(
                               youtubeVideos[solos[soloIndex].melid]?.filter(
-                                ({ youtube_id }) => !badVideos.has(youtube_id)
+                                ({ youtube_id }) =>
+                                  !badVideos.has(youtube_id) &&
+                                  !BAD_VIDEOS.has(youtube_id)
                               )?.[0].youtube_id
                             );
                             setBeatsData(null);
@@ -287,7 +299,7 @@ function App() {
           <Fragment key={youtube_id}>
             <span
               style={
-                badVideos.has(youtube_id)
+                badVideos.has(youtube_id) || BAD_VIDEOS.has(youtube_id)
                   ? { textDecoration: "line-through" }
                   : youtubeId === youtube_id
                   ? { fontWeight: 700 }
