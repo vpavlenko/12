@@ -120,7 +120,7 @@ const CsvLoader: FC<{
     fetch(filePath)
       .then((response) => response.text())
       .then((csvText) => {
-        Papa.parse(csvText, {
+        Papa.parse(csvText.trim(), {
           complete: ({ data }) => {
             innerSetData(data);
             setData(data);
@@ -158,6 +158,17 @@ const dataToChoruses = (
   }));
 };
 
+const MiniMap: FC<{ beatsData: BeatsItem[]; melodyData: MelodyItem[] }> = ({
+  beatsData,
+  melodyData,
+}) => {
+  return (
+    <div style={{ width: "100%", color: "black" }}>
+      {beatsData[0]?.bar} - {beatsData.at(-1)?.bar}
+    </div>
+  );
+};
+
 function App() {
   const [selectedSolo, setSelectedSolo] = useState(1);
   const [melodyData, setMelodyData] = useState<MelodyItem[]>([]);
@@ -193,7 +204,6 @@ function App() {
           );
         }
       }
-      console.log(absoluteTime, barOnsets);
       return -10;
     };
   }, [beatsData]);
@@ -219,34 +229,66 @@ function App() {
 
   return (
     <>
-      {Object.entries(STYLES).map(([style_, years]) => (
-        <div key={style_}>
-          <b>
-            {style_.toLowerCase()}, {years}:{" "}
-          </b>
-          {solos.map(
-            ({ title, style }, index) =>
-              style === style_ && (
-                <Fragment key={index}>
-                  <span
-                    style={
-                      index === selectedSolo
-                        ? { fontWeight: 700 }
-                        : { cursor: "pointer" }
+      <div style={{ columnCount: 4, columnGap: "20px", width: "100%" }}>
+        {Object.entries(STYLES).map(([style_, years]) => (
+          <div
+            key={style_}
+            style={{ breakInside: "avoid", marginBottom: "20px" }}
+          >
+            <b>
+              {style_.toLowerCase()}, {years}:{" "}
+            </b>
+            <div>
+              {Object.entries(
+                solos.reduce<Record<string, JSX.Element[]>>(
+                  (acc, { title, performer, style }, soloIndex) => {
+                    if (style === style_) {
+                      if (!acc[performer]) acc[performer] = [];
+                      acc[performer].push(
+                        <span
+                          key={soloIndex}
+                          style={{
+                            display: "inline",
+                            fontWeight:
+                              soloIndex === selectedSolo ? 700 : "normal",
+                            cursor: "pointer",
+                          }}
+                          onClick={() => {
+                            setSelectedSolo(soloIndex);
+                            setYoutubeId(null);
+                          }}
+                        >
+                          {title}
+                        </span>
+                      );
                     }
-                    onClick={() => {
-                      setSelectedSolo(index);
-                      setYoutubeId(null);
-                    }}
-                  >
-                    {title}
-                  </span>
-                  {", "}
-                </Fragment>
-              )
-          )}
-        </div>
-      ))}
+                    return acc;
+                  },
+                  {}
+                )
+              ).map(([performer, titles], perfIndex) => (
+                <div
+                  key={perfIndex}
+                  style={{ paddingLeft: "3em", textIndent: "-3em" }}
+                >
+                  <span style={{ fontStyle: "italic" }}>{performer}: </span>
+                  {titles.reduce(
+                    (prev, curr, idx) => (
+                      <>
+                        {prev}
+                        {idx > 0 ? ", " : ""}
+                        <span style={{ whiteSpace: "nowrap" }}>{curr}</span>
+                      </>
+                    ),
+                    <></>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div style={{ marginTop: "40px" }}>
         A {style.toLowerCase()} solo on{" "}
         <span style={{ color: "darkorange", fontWeight: 700 }}>"{title}"</span>{" "}
@@ -278,6 +320,7 @@ function App() {
           </Fragment>
         ))}
       </div>
+      <MiniMap beatsData={beatsData} melodyData={melodyData} />
       <TonalGrid
         choruses={choruses}
         beats={beatsData}
