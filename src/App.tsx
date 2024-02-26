@@ -330,7 +330,10 @@ function App() {
               autoplay: 1,
             },
           }}
-          onReady={(event) => (playerRef.current = event.target)}
+          onReady={(event) => {
+            playerRef.current = event.target;
+            event.target.seekTo(youtubeItem.solo_start_sec, true);
+          }}
           onError={() => addBadVideo(youtubeId)}
         />
       )}
