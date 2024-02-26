@@ -249,6 +249,9 @@ function App() {
     return () => cancelAnimationFrame(animationFrameId);
   }, [youtubeItem]);
 
+  const startBar = parseInt(beatsData[0]?.bar ?? "0", 10);
+  const endBar = parseInt(beatsData.at(-1)?.bar ?? "0", 10);
+
   return (
     <>
       <div style={{ columnCount: 4, columnGap: "20px", width: "100vw" }}>
@@ -354,9 +357,12 @@ function App() {
         beats={beatsData}
         key_={solos[selectedSolo].key}
         currentYoutubeTime={mapToRelativeTime(currentYoutubeTime + 0.05)}
-        measures={MEASURES}
         measureWidth={100}
         noteHeight={10}
+        measures={Array.from(
+          { length: endBar - startBar + 1 },
+          (_, index) => index + startBar
+        )}
       />
       {youtubeId && (
         <YouTube

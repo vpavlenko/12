@@ -36,11 +36,19 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
 }) => (
   <>
     <MeasureBar
-      style={{ left, ...(number % 4 === 1 ? { backgroundColor: "#aaa" } : {}) }}
+      style={{
+        left,
+        ...(number % 12 === 1
+          ? { backgroundColor: "#a0f" }
+          : number % 4 === 1
+          ? { backgroundColor: "#aaa" }
+          : {}),
+      }}
     />
-    {[1, 2, 3].map((beat) => (
-      <BeatBar style={{ left: left + (beat * measureWidth) / 4 }} />
-    ))}
+    {measureWidth > 30 &&
+      [1, 2, 3].map((beat) => (
+        <BeatBar style={{ left: left + (beat * measureWidth) / 4 }} />
+      ))}
     <div
       style={{ position: "absolute", left: left + 10, top: 20, color: "white" }}
     >
