@@ -6,6 +6,8 @@ import Papa from "papaparse";
 import YouTube, { YouTubePlayer } from "react-youtube";
 import TonalGrid from "./components/TonalGrid";
 
+const MEASURES = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+
 const STYLES = {
   TRADITIONAL: "1910..30s",
   SWING: "1930..40s",
@@ -158,13 +160,29 @@ const dataToChoruses = (
   }));
 };
 
-const MiniMap: FC<{ beatsData: BeatsItem[]; melodyData: MelodyItem[] }> = ({
-  beatsData,
-  melodyData,
-}) => {
+const MiniMap: FC<{
+  beatsData: BeatsItem[];
+  key_: string;
+  choruses: Note[];
+  currentYoutubeTime: number;
+}> = ({ beatsData, key_, choruses, currentYoutubeTime }) => {
+  const startBar = parseInt(beatsData[0]?.bar ?? "0", 10);
+  const endBar = parseInt(beatsData.at(-1)?.bar ?? "0", 10);
+  console.log(choruses);
   return (
     <div style={{ width: "100%", color: "black" }}>
-      {beatsData[0]?.bar} - {beatsData.at(-1)?.bar}
+      <TonalGrid
+        choruses={choruses}
+        beats={beatsData}
+        key_={key_}
+        currentYoutubeTime={currentYoutubeTime}
+        measures={Array.from(
+          { length: endBar - startBar + 1 },
+          (_, index) => index + startBar
+        )}
+        measureWidth={30}
+        noteHeight={3}
+      />
     </div>
   );
 };
@@ -195,7 +213,11 @@ function App() {
       }
     });
     return (absoluteTime: number) => {
-      for (let i = -1; i <= 14; ++i) {
+      for (const iAsString in barOnsets) {
+        const i = parseInt(iAsString, 10);
+        if (!(i - 1 in barOnsets)) {
+          continue;
+        }
         if (absoluteTime < barOnsets[i]) {
           return (
             i +
@@ -229,7 +251,7 @@ function App() {
 
   return (
     <>
-      <div style={{ columnCount: 4, columnGap: "20px", width: "100%" }}>
+      <div style={{ columnCount: 4, columnGap: "20px", width: "100vw" }}>
         {Object.entries(STYLES).map(([style_, years]) => (
           <div
             key={style_}
@@ -241,7 +263,7 @@ function App() {
             <div>
               {Object.entries(
                 solos.reduce<Record<string, JSX.Element[]>>(
-                  (acc, { title, performer, style }, soloIndex) => {
+                  (acc, { title, solopart, performer, style }, soloIndex) => {
                     if (style === style_) {
                       if (!acc[performer]) acc[performer] = [];
                       acc[performer].push(
@@ -259,6 +281,7 @@ function App() {
                           }}
                         >
                           {title}
+                          {solopart > 1 && ` (${solopart})`}
                         </span>
                       );
                     }
@@ -320,12 +343,20 @@ function App() {
           </Fragment>
         ))}
       </div>
-      <MiniMap beatsData={beatsData} melodyData={melodyData} />
+      <MiniMap
+        beatsData={beatsData}
+        choruses={choruses}
+        key_={solos[selectedSolo].key}
+        currentYoutubeTime={mapToRelativeTime(currentYoutubeTime + 0.05)}
+      />
       <TonalGrid
         choruses={choruses}
         beats={beatsData}
         key_={solos[selectedSolo].key}
         currentYoutubeTime={mapToRelativeTime(currentYoutubeTime + 0.05)}
+        measures={MEASURES}
+        measureWidth={100}
+        noteHeight={10}
       />
       {youtubeId && (
         <YouTube

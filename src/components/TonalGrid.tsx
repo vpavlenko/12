@@ -24,24 +24,22 @@ const BeatBar = styled(VerticalBar)`
   border-left: 1px dashed #262626;
 `;
 
-const BEAT_WIDTH = 25;
-const MEASURE_WIDTH = BEAT_WIDTH * 4;
-const NOTE_HEIGHT = 10;
-
 const MIN_PITCH = 40;
 const MAX_PITCH = 90;
 
-const MEASURES = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
-
 const KEYS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 
-const Measure: FC<{ number: number; left: number }> = ({ number, left }) => (
+const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
+  number,
+  left,
+  measureWidth,
+}) => (
   <>
     <MeasureBar
       style={{ left, ...(number % 4 === 1 ? { backgroundColor: "#aaa" } : {}) }}
     />
     {[1, 2, 3].map((beat) => (
-      <BeatBar style={{ left: left + beat * BEAT_WIDTH }} />
+      <BeatBar style={{ left: left + (beat * measureWidth) / 4 }} />
     ))}
     <div
       style={{ position: "absolute", left: left + 10, top: 20, color: "white" }}
@@ -56,7 +54,18 @@ const TonalGrid: FC<{
   beats: BeatsItem[];
   key_: string;
   currentYoutubeTime: number;
-}> = ({ choruses, beats, key_, currentYoutubeTime }) => {
+  measures: number[];
+  measureWidth: number;
+  noteHeight: number;
+}> = ({
+  choruses,
+  beats,
+  key_,
+  currentYoutubeTime,
+  measures,
+  measureWidth,
+  noteHeight,
+}) => {
   const tonic = key_ ? KEYS.indexOf(key_.split("-")[0]) : 0;
   const octaves = [];
   for (let octave = 0; octave <= 9; ++octave) {
@@ -68,9 +77,9 @@ const TonalGrid: FC<{
           style={{
             position: "absolute",
             width: "100%",
-            height: 6 * NOTE_HEIGHT,
+            height: 6 * noteHeight,
             left: 0,
-            top: (MAX_PITCH - midiNumber - 6) * NOTE_HEIGHT,
+            top: (MAX_PITCH - midiNumber - 6) * noteHeight,
             pointerEvents: "none",
             background: `linear-gradient(to top, #222, transparent)`,
             zIndex: 0,
@@ -82,23 +91,24 @@ const TonalGrid: FC<{
     <div
       style={{
         position: "relative",
-        width: MEASURES.length * MEASURE_WIDTH,
-        height: (MAX_PITCH - MIN_PITCH + 1) * NOTE_HEIGHT,
+        width: measures.length * measureWidth,
+        height: (MAX_PITCH - MIN_PITCH + 1) * noteHeight,
         backgroundColor: "black",
       }}
     >
       {currentYoutubeTime !== -10 &&
         currentYoutubeTime != null &&
         !isNaN(currentYoutubeTime) && (
-          <Cursor style={{ left: currentYoutubeTime * MEASURE_WIDTH }} />
+          <Cursor style={{ left: currentYoutubeTime * measureWidth }} />
         )}
       {octaves}
-      {MEASURES.map((number, index) => (
+      {measures.map((number, index) => (
         <>
           <Measure
             key={number}
             number={number}
-            left={index * MEASURE_WIDTH - 1}
+            left={index * measureWidth - 1}
+            measureWidth={measureWidth}
           />
         </>
       ))}
@@ -109,10 +119,10 @@ const TonalGrid: FC<{
             className={`noteColor_${(pitch - tonic) % 12}_colors`}
             style={{
               position: "absolute",
-              width: duration * MEASURE_WIDTH,
-              height: NOTE_HEIGHT,
-              top: (MAX_PITCH - pitch - 1) * NOTE_HEIGHT,
-              left: onset * MEASURE_WIDTH,
+              width: duration * measureWidth,
+              height: noteHeight,
+              top: (MAX_PITCH - pitch - 1) * noteHeight,
+              left: onset * measureWidth,
               zIndex: 10,
             }}
           />
@@ -127,7 +137,7 @@ const TonalGrid: FC<{
               position: "absolute",
               left:
                 (parseInt(bar, 10) + 1 + (parseInt(beat, 10) - 1) / 4) *
-                MEASURE_WIDTH,
+                measureWidth,
               color: "yellow",
             }}
           >
