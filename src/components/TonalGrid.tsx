@@ -1,6 +1,7 @@
 import { FC } from "react";
 import styled from "styled-components";
 import { BeatsItem, MelodyItem } from "../App";
+import { Progression } from "tonal";
 
 const VerticalBar = styled.div`
   width: 1px;
@@ -46,11 +47,18 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
       [1, 2, 3].map((beat) => (
         <BeatBar style={{ left: left + (beat * measureWidth) / 4 }} />
       ))}
-    <div
-      style={{ position: "absolute", left: left + 10, top: 20, color: "white" }}
-    >
-      {number}
-    </div>
+    {measureWidth > 30 && (
+      <div
+        style={{
+          position: "absolute",
+          left: left + 10,
+          top: 20,
+          color: "white",
+        }}
+      >
+        {number}
+      </div>
+    )}
   </>
 );
 
@@ -149,20 +157,22 @@ const TonalGrid: FC<{
           />
         )
       )}
-      {beats
-        .filter(({ chord }) => chord)
-        .map(({ onset, chord }, index) => (
-          <div
-            key={index}
-            style={{
-              position: "absolute",
-              left: mapToRelativeTime(onset) * measureWidth,
-              color: "yellow",
-            }}
-          >
-            {chord}
-          </div>
-        ))}
+      {measureWidth > 30 &&
+        beats
+          .filter(({ chord }) => chord)
+          .map(({ onset, chord }, index) => (
+            <div
+              key={index}
+              style={{
+                position: "absolute",
+                left: mapToRelativeTime(onset) * measureWidth + 5,
+                color: "yellow",
+              }}
+            >
+              {/* {chord} */}
+              {Progression.toRomanNumerals(key_.split("-")[0], [chord])[0]}
+            </div>
+          ))}
     </div>
   );
 };

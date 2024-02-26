@@ -16,6 +16,7 @@
     "react-dom": "^18.2.0",
     "react-youtube": "^10.1.0",
     "styled-components": "^6.1.8",
+    "tonal": "^6.0.0",
     "usehooks-ts": "^2.15.1"
   },
   "devDependencies": {
