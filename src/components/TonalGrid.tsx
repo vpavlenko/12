@@ -1,6 +1,6 @@
 import { FC } from "react";
 import styled from "styled-components";
-import { BeatsItem, Note } from "../App";
+import { BeatsItem, MelodyItem } from "../App";
 
 const VerticalBar = styled.div`
   width: 1px;
@@ -23,9 +23,6 @@ const MeasureBar = styled(VerticalBar)`
 const BeatBar = styled(VerticalBar)`
   border-left: 1px dashed #262626;
 `;
-
-const MIN_PITCH = 40;
-const MAX_PITCH = 90;
 
 const KEYS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
 
@@ -58,29 +55,35 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
 );
 
 const TonalGrid: FC<{
-  choruses: Note[];
   beats: BeatsItem[];
+  melody: MelodyItem[];
   key_: string;
   currentYoutubeTime: number;
-  measures: number[];
   measureWidth: number;
   noteHeight: number;
   mapToRelativeTime: (time: number) => number;
 }> = ({
-  choruses,
   beats,
+  melody,
   key_,
   currentYoutubeTime,
-  measures,
   measureWidth,
   noteHeight,
   mapToRelativeTime,
 }) => {
+  const startBar = beats[0].bar;
+  const endBar = beats.at(-1)!.bar;
+  const measures = Array.from(
+    { length: endBar - startBar + 1 },
+    (_, index) => index + startBar
+  );
+  const minPitch = Math.min(...melody.map(({ pitch }) => pitch)) - 2;
+  const maxPitch = Math.max(...melody.map(({ pitch }) => pitch)) + 6;
   const tonic = key_ ? KEYS.indexOf(key_.split("-")[0]) : 0;
   const octaves = [];
   for (let octave = 0; octave <= 9; ++octave) {
     const midiNumber = tonic + octave * 12;
-    if (midiNumber >= MIN_PITCH && midiNumber + 4 <= MAX_PITCH)
+    if (midiNumber >= minPitch && midiNumber + 4 <= maxPitch)
       octaves.push(
         <div
           key={`tonalgrid_octave_${midiNumber}`}
@@ -89,7 +92,7 @@ const TonalGrid: FC<{
             width: "100%",
             height: 6 * noteHeight,
             left: 0,
-            top: (MAX_PITCH - midiNumber - 6) * noteHeight,
+            top: (maxPitch - midiNumber - 6) * noteHeight,
             pointerEvents: "none",
             background: `linear-gradient(to top, #222, transparent)`,
             zIndex: 0,
@@ -102,27 +105,35 @@ const TonalGrid: FC<{
       style={{
         position: "relative",
         width: measures.length * measureWidth,
-        height: (MAX_PITCH - MIN_PITCH + 1) * noteHeight,
+        height: (maxPitch - minPitch + 1) * noteHeight,
         backgroundColor: "black",
+        marginTop: "20px",
+        marginBottom: "20px",
       }}
     >
       {currentYoutubeTime !== -10 &&
         currentYoutubeTime != null &&
         !isNaN(currentYoutubeTime) && (
-          <Cursor style={{ left: currentYoutubeTime * measureWidth }} />
+          <Cursor
+            style={{
+              left: mapToRelativeTime(currentYoutubeTime) * measureWidth,
+            }}
+          />
         )}
       {octaves}
-      {measures.map((number, index) => (
-        <>
-          <Measure
-            key={number}
-            number={number}
-            left={index * measureWidth - 1}
-            measureWidth={measureWidth}
-          />
-        </>
-      ))}
-      {choruses.map(({ pitch, onset, duration }, index) =>
+      {beats
+        .filter(({ beat }) => beat === 1)
+        .map(({ bar, onset }) => (
+          <>
+            <Measure
+              key={bar}
+              number={bar}
+              left={mapToRelativeTime(onset) * measureWidth}
+              measureWidth={measureWidth}
+            />
+          </>
+        ))}
+      {melody.map(({ pitch, onset, duration }, index) =>
         isNaN(pitch) ? null : (
           <div
             key={index}
@@ -131,8 +142,8 @@ const TonalGrid: FC<{
               position: "absolute",
               width: duration * measureWidth,
               height: noteHeight,
-              top: (MAX_PITCH - pitch - 1) * noteHeight,
-              left: onset * measureWidth,
+              top: (maxPitch - pitch - 1) * noteHeight,
+              left: mapToRelativeTime(onset) * measureWidth,
               zIndex: 10,
             }}
           />
@@ -145,9 +156,7 @@ const TonalGrid: FC<{
             key={index}
             style={{
               position: "absolute",
-              left:
-                mapToRelativeTime &&
-                mapToRelativeTime(parseFloat(onset)) * measureWidth,
+              left: mapToRelativeTime(onset) * measureWidth,
               color: "yellow",
             }}
           >

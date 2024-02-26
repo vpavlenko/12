@@ -7,8 +7,6 @@ import YouTube, { YouTubePlayer } from "react-youtube";
 import TonalGrid from "./components/TonalGrid";
 import useLocalStorageSet from "./components/useLocalStorageSet";
 
-const MEASURES = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
-
 const STYLES = {
   TRADITIONAL: "1910..30s",
   SWING: "1930..40s",
@@ -32,14 +30,14 @@ const INSTRUMENTS = {
 };
 
 type YoutubeEntry = {
-  index: string;
+  index: number;
   db: string;
-  melid: string;
-  mf_median: string;
-  mf_min: string;
+  melid: number;
+  mf_median: number;
+  mf_min: number;
   query: string;
-  solo_end_sec: string;
-  solo_start_sec: string;
+  solo_end_sec: number;
+  solo_start_sec: number;
   wp_end_idx: string;
   wp_start_idx: string;
   youtube_id: string;
@@ -84,16 +82,16 @@ type JazzSolo = {
   genre: string;
 };
 
-type MelodyItem = {
-  onset: string;
-  duration: string;
-  pitch: string;
+export type MelodyItem = {
+  onset: number;
+  duration: number;
+  pitch: number;
 };
 
 export type BeatsItem = {
-  bar: string;
-  beat: string;
-  onset: string;
+  bar: number;
+  beat: number;
+  onset: number;
   chord: string;
 };
 
@@ -149,54 +147,11 @@ const CsvLoader: FC<{
 
 const solos: JazzSolo[] = data;
 
-const dataToChoruses = (
-  melodyData: MelodyItem[],
-  mapToRelativeTime: (time: number) => number
-): Note[] => {
-  return melodyData.map(({ duration, onset, pitch }) => ({
-    duration:
-      mapToRelativeTime(parseFloat(onset) + parseFloat(duration)) -
-      mapToRelativeTime(parseFloat(onset)),
-    onset: mapToRelativeTime(parseFloat(onset)),
-    pitch: parseFloat(pitch),
-  }));
-};
-
-const MiniMap: FC<{
-  beatsData: BeatsItem[];
-  key_: string;
-  choruses: Note[];
-  currentYoutubeTime: number;
-  mapToRelativeTime: (time: number) => number;
-}> = ({ beatsData, key_, choruses, currentYoutubeTime, mapToRelativeTime }) => {
-  const startBar = parseInt(beatsData[0]?.bar ?? "0", 10);
-  const endBar = parseInt(beatsData.at(-1)?.bar ?? "0", 10);
-  console.log(choruses);
-  return (
-    <div style={{ width: "100%", color: "black" }}>
-      <TonalGrid
-        choruses={choruses}
-        beats={beatsData}
-        key_={key_}
-        currentYoutubeTime={currentYoutubeTime}
-        measures={Array.from(
-          { length: endBar - startBar + 1 },
-          (_, index) => index + startBar
-        )}
-        measureWidth={30}
-        noteHeight={3}
-        mapToRelativeTime={mapToRelativeTime}
-      />
-    </div>
-  );
-};
-
 function App() {
   const [selectedSolo, setSelectedSolo] = useState(1);
-  const [melodyData, setMelodyData] = useState<MelodyItem[]>([]);
-  const [beatsData, setBeatsData] = useState<BeatsItem[]>([]);
+  const [melodyData, setMelodyData] = useState<MelodyItem[] | null>(null);
+  const [beatsData, setBeatsData] = useState<BeatsItem[] | null>(null);
   const [youtubeId, setYoutubeId] = useState<string | null>(null);
-  const [choruses, setChoruses] = useState<Note[]>([]);
   const [currentYoutubeTime, setCurrentYoutubeTime] = useState<number>(0);
   const [badVideos, addBadVideo] = useLocalStorageSet("badVideos");
   const playerRef = useRef<YouTubePlayer>();
@@ -212,39 +167,37 @@ function App() {
 
   const mapToRelativeTime = useMemo(() => {
     const barOnsets: { [key: number]: number } = {};
-    beatsData.forEach(({ bar, beat, onset }) => {
-      if (beat == "1") {
-        barOnsets[parseInt(bar, 10)] = parseFloat(onset);
+    beatsData?.forEach(({ bar, beat, onset }) => {
+      if (beat === 1) {
+        barOnsets[bar] = onset;
       }
     });
-    return (absoluteTime: number) => {
-      for (const iAsString in barOnsets) {
-        const i = parseInt(iAsString, 10);
-        if (!(i - 1 in barOnsets)) {
-          continue;
+    return beatsData
+      ? (absoluteTime: number) => {
+          for (const iAsString in barOnsets) {
+            const i = parseInt(iAsString, 10);
+            if (!(i - 1 in barOnsets)) {
+              continue;
+            }
+            if (absoluteTime < barOnsets[i]) {
+              return (
+                i -
+                beatsData[0].bar +
+                (absoluteTime - barOnsets[i - 1]) /
+                  (barOnsets[i] - barOnsets[i - 1])
+              );
+            }
+          }
+          return -10;
         }
-        if (absoluteTime < barOnsets[i]) {
-          return (
-            i +
-            (absoluteTime - barOnsets[i - 1]) /
-              (barOnsets[i] - barOnsets[i - 1])
-          );
-        }
-      }
-      return -10;
-    };
+      : () => 0;
   }, [beatsData]);
-
-  useEffect(
-    () => setChoruses(dataToChoruses(melodyData, mapToRelativeTime)),
-    [melodyData, beatsData, mapToRelativeTime]
-  );
 
   useEffect(() => {
     function updateCurrentTime() {
       const time = playerRef?.current?.getCurrentTime();
       if (typeof time === "number") {
-        setCurrentYoutubeTime(time - parseFloat(youtubeItem.solo_start_sec));
+        setCurrentYoutubeTime(time - youtubeItem.solo_start_sec);
       }
       requestAnimationFrame(updateCurrentTime);
     }
@@ -253,9 +206,6 @@ function App() {
 
     return () => cancelAnimationFrame(animationFrameId);
   }, [youtubeItem]);
-
-  const startBar = parseInt(beatsData[0]?.bar ?? "0", 10);
-  const endBar = parseInt(beatsData.at(-1)?.bar ?? "0", 10);
 
   return (
     <>
@@ -286,6 +236,8 @@ function App() {
                           onClick={() => {
                             setSelectedSolo(soloIndex);
                             setYoutubeId(null);
+                            setBeatsData(null);
+                            setMelodyData(null);
                           }}
                         >
                           {title}
@@ -327,7 +279,7 @@ function App() {
         <span style={{ color: "darkgreen", fontWeight: 700 }}>{performer}</span>{" "}
         ({INSTRUMENTS[instrument as keyof typeof INSTRUMENTS]}) in {key}.
         Youtube videos:{" "}
-        {youtubeVideos[melid]?.map(({ youtube_id }, index) => (
+        {youtubeVideos[melid]?.map(({ youtube_id }) => (
           <Fragment key={youtube_id}>
             <span
               style={
@@ -347,31 +299,34 @@ function App() {
           </Fragment>
         ))}
       </div>
-      <MiniMap
-        beatsData={beatsData}
-        choruses={choruses}
-        key_={solos[selectedSolo].key}
-        currentYoutubeTime={mapToRelativeTime(currentYoutubeTime + 0.05)}
-      />
-      <TonalGrid
-        choruses={choruses}
-        beats={beatsData}
-        key_={solos[selectedSolo].key}
-        currentYoutubeTime={mapToRelativeTime(currentYoutubeTime + 0.05)}
-        measureWidth={100}
-        noteHeight={10}
-        measures={Array.from(
-          { length: endBar - startBar + 1 },
-          (_, index) => index + startBar
-        )}
-        mapToRelativeTime={mapToRelativeTime}
-      />
+      {beatsData && melodyData && (
+        <TonalGrid
+          beats={beatsData}
+          melody={melodyData}
+          key_={solos[selectedSolo].key}
+          currentYoutubeTime={currentYoutubeTime + 0.05}
+          measureWidth={30}
+          noteHeight={3}
+          mapToRelativeTime={mapToRelativeTime}
+        />
+      )}
+      {beatsData && melodyData && (
+        <TonalGrid
+          beats={beatsData}
+          melody={melodyData}
+          key_={solos[selectedSolo].key}
+          currentYoutubeTime={currentYoutubeTime + 0.05}
+          measureWidth={100}
+          noteHeight={10}
+          mapToRelativeTime={mapToRelativeTime}
+        />
+      )}
       {youtubeId && youtubeItem && (
         <YouTube
           videoId={youtubeId}
           opts={{
             playerVars: {
-              start: parseFloat(youtubeItem.solo_start_sec),
+              start: youtubeItem.solo_start_sec,
               autoplay: 1,
             },
           }}
