@@ -148,7 +148,10 @@ const TonalGrid: FC<{
             className={`noteColor_${(pitch - tonic) % 12}_colors`}
             style={{
               position: "absolute",
-              width: duration * measureWidth,
+              width:
+                (mapToRelativeTime(onset + duration) -
+                  mapToRelativeTime(onset)) *
+                measureWidth,
               height: noteHeight,
               top: (maxPitch - pitch - 1) * noteHeight,
               left: mapToRelativeTime(onset) * measureWidth,
@@ -160,19 +163,22 @@ const TonalGrid: FC<{
       {measureWidth > 30 &&
         beats
           .filter(({ chord }) => chord)
-          .map(({ onset, chord }, index) => (
-            <div
-              key={index}
-              style={{
-                position: "absolute",
-                left: mapToRelativeTime(onset) * measureWidth + 5,
-                color: "yellow",
-              }}
-            >
-              {/* {chord} */}
-              {Progression.toRomanNumerals(key_.split("-")[0], [chord])[0]}
-            </div>
-          ))}
+          .map(({ onset, chord }, index) => {
+            return (
+              <div
+                key={index}
+                style={{
+                  position: "absolute",
+                  left: mapToRelativeTime(onset) * measureWidth + 5,
+                  color: "yellow",
+                }}
+              >
+                {Progression.toRomanNumerals(key_.split("-")[0], [
+                  chord,
+                ])[0].replace("m7b5", "ø")}
+              </div>
+            );
+          })}
     </div>
   );
 };
