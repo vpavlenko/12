@@ -112,7 +112,7 @@ const TonalGrid: FC<{
     <div
       style={{
         position: "relative",
-        width: measures.length * measureWidth,
+        width: (measures.length + 1) * measureWidth,
         height: (maxPitch - minPitch + 1) * noteHeight,
         backgroundColor: "black",
         marginTop: "20px",

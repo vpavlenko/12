@@ -179,7 +179,7 @@ function App() {
             if (!(i - 1 in barOnsets)) {
               continue;
             }
-            if (absoluteTime < barOnsets[i]) {
+            if (absoluteTime <= barOnsets[i]) {
               return (
                 i -
                 beatsData[0].bar +
@@ -235,7 +235,11 @@ function App() {
                           }}
                           onClick={() => {
                             setSelectedSolo(soloIndex);
-                            setYoutubeId(null);
+                            setYoutubeId(
+                              youtubeVideos[solos[soloIndex].melid]?.filter(
+                                ({ youtube_id }) => !badVideos.has(youtube_id)
+                              )?.[0].youtube_id
+                            );
                             setBeatsData(null);
                             setMelodyData(null);
                           }}
