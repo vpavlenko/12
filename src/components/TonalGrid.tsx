@@ -159,6 +159,7 @@ const TonalGrid: FC<{
               height: noteHeight,
               top: (maxPitch - pitch - 1) * noteHeight,
               left: mapToRelativeTime(onset) * measureWidth,
+              borderRadius: "5px",
               zIndex: 10,
             }}
           />
