@@ -398,31 +398,35 @@ function App() {
         />
       )}
       {youtubeId && youtubeItem && (
-        <YouTube
-          videoId={youtubeId}
-          opts={{
-            height: "100",
-            width: "1500",
-            playerVars: {
-              start: youtubeItem.solo_start_sec,
-              autoplay: 1,
-            },
-          }}
-          onReady={(event) => {
-            playerRef.current = event.target;
-            event.target.seekTo(youtubeItem.solo_start_sec, true);
-          }}
-          onError={() => addBadVideo(youtubeId)}
-        />
+        <div style={{ position: "fixed", left: 0, bottom: 0 }}>
+          <YouTube
+            videoId={youtubeId}
+            opts={{
+              height: "100",
+              width: "1500",
+              playerVars: {
+                start: youtubeItem.solo_start_sec,
+                autoplay: 1,
+              },
+            }}
+            onReady={(event) => {
+              playerRef.current = event.target;
+              event.target.seekTo(youtubeItem.solo_start_sec, true);
+            }}
+            onError={() => addBadVideo(youtubeId)}
+          />
+        </div>
       )}
-      <CsvLoader
-        filePath={`csv_melody/${makeFileName(solos[selectedSolo])}`}
-        setData={setMelodyData}
-      />
-      <CsvLoader
-        filePath={`csv_beats/${makeFileName(solos[selectedSolo])}`}
-        setData={setBeatsData}
-      />
+      <div style={{ marginTop: 200 }}>
+        <CsvLoader
+          filePath={`csv_melody/${makeFileName(solos[selectedSolo])}`}
+          setData={setMelodyData}
+        />
+        <CsvLoader
+          filePath={`csv_beats/${makeFileName(solos[selectedSolo])}`}
+          setData={setBeatsData}
+        />
+      </div>
     </>
   );
 }
