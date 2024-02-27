@@ -1,4 +1,12 @@
-import { FC, Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FC,
+  Fragment,
+  ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import "./App.css";
 import data from "../data/wjd_maj_blues.json";
 import jazztubeData from "../data/jazztube.json";
@@ -156,17 +164,34 @@ const CsvLoader: FC<{
 
   return (
     <div style={{ fontSize: "10px" }}>
-      <div>
-        <b>{filePath}</b>
-      </div>
-      {data.map((line, index) => (
-        <div key={index}>{JSON.stringify(line)}</div>
-      ))}
+      <CollapsibleDiv title={filePath}>
+        {data.map((line, index) => (
+          <div key={index}>{JSON.stringify(line)}</div>
+        ))}
+      </CollapsibleDiv>
     </div>
   );
 };
 
 const solos: JazzSolo[] = data;
+
+const CollapsibleDiv: FC<{ title: string; children?: ReactNode }> = ({
+  title,
+  children,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const toggleOpen = () => setIsOpen(!isOpen);
+
+  return (
+    <div>
+      <div onClick={toggleOpen} style={{ cursor: "pointer" }}>
+        {title}
+      </div>
+      {isOpen && <div>{children}</div>}
+    </div>
+  );
+};
 
 function App() {
   // TODO: store selectedSolo via melid and persist to URL:
@@ -323,7 +348,7 @@ function App() {
         ))}
       </div>
 
-      <div style={{ marginTop: "40px" }}>
+      <div style={{ marginTop: "40px", fontSize: 16 }}>
         A {style.toLowerCase()} solo on{" "}
         <span style={{ color: "darkorange", fontWeight: 700 }}>"{title}"</span>{" "}
         by{" "}
@@ -356,8 +381,8 @@ function App() {
           melody={melodyData}
           key_={solos[selectedSolo].key}
           currentYoutubeTime={currentYoutubeTime + 0.05}
-          measureWidth={30}
-          noteHeight={3}
+          measureWidth={25}
+          noteHeight={2}
           mapToRelativeTime={mapToRelativeTime}
         />
       )}
@@ -368,7 +393,7 @@ function App() {
           key_={solos[selectedSolo].key}
           currentYoutubeTime={currentYoutubeTime + 0.05}
           measureWidth={100}
-          noteHeight={10}
+          noteHeight={9}
           mapToRelativeTime={mapToRelativeTime}
         />
       )}
@@ -376,6 +401,8 @@ function App() {
         <YouTube
           videoId={youtubeId}
           opts={{
+            height: "100",
+            width: "1500",
             playerVars: {
               start: youtubeItem.solo_start_sec,
               autoplay: 1,
