@@ -34,7 +34,7 @@ const STYLES = {
   BEBOP: "1940..50s",
   COOL: "1950..60s",
   HARDBOP: "1950..60s",
-  POSTBOP: "1960..70s",
+  POSTBOP: "1960..90s",
 };
 
 const INSTRUMENTS = {

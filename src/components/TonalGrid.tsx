@@ -55,7 +55,7 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
       <div
         style={{
           position: "absolute",
-          left: left + 10,
+          left: left + 5,
           top: 20,
           color: "white",
         }}
