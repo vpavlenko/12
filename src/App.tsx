@@ -228,6 +228,11 @@ function App() {
     return () => cancelAnimationFrame(animationFrameId);
   }, [youtubeItem]);
 
+  const mergedBadVideos = useMemo(
+    () => new Set([...badVideos, ...BAD_VIDEOS]),
+    [badVideos, BAD_VIDEOS]
+  );
+
   return (
     <>
       <div style={{ columnCount: 4, columnGap: "20px", width: "100vw" }}>
@@ -242,7 +247,11 @@ function App() {
             <div>
               {Object.entries(
                 solos.reduce<Record<string, JSX.Element[]>>(
-                  (acc, { title, solopart, performer, style }, soloIndex) => {
+                  (
+                    acc,
+                    { title, solopart, performer, style, melid },
+                    soloIndex
+                  ) => {
                     if (style === style_) {
                       if (!acc[performer]) acc[performer] = [];
                       acc[performer].push(
@@ -253,14 +262,19 @@ function App() {
                             fontWeight:
                               soloIndex === selectedSolo ? 700 : "normal",
                             cursor: "pointer",
+                            ...(youtubeVideos[melid]?.filter(
+                              ({ youtube_id }) =>
+                                !mergedBadVideos.has(youtube_id)
+                            ).length > 0
+                              ? {}
+                              : { color: "lightgray" }),
                           }}
                           onClick={() => {
                             setSelectedSolo(soloIndex);
                             setYoutubeId(
                               youtubeVideos[solos[soloIndex].melid]?.filter(
                                 ({ youtube_id }) =>
-                                  !badVideos.has(youtube_id) &&
-                                  !BAD_VIDEOS.has(youtube_id)
+                                  !mergedBadVideos.has(youtube_id)
                               )?.[0].youtube_id
                             );
                             setBeatsData(null);
@@ -310,7 +324,7 @@ function App() {
           <Fragment key={youtube_id}>
             <span
               style={
-                badVideos.has(youtube_id) || BAD_VIDEOS.has(youtube_id)
+                mergedBadVideos.has(youtube_id)
                   ? { textDecoration: "line-through" }
                   : youtubeId === youtube_id
                   ? { fontWeight: 700 }
