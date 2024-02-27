@@ -3,6 +3,10 @@ import styled from "styled-components";
 import { BeatsItem, MelodyItem } from "../App";
 import { Progression } from "tonal";
 
+const mod = (n: number, m: number): number => {
+  return ((n % m) + m) % m;
+};
+
 const VerticalBar = styled.div`
   width: 1px;
   height: 100%;
@@ -36,9 +40,9 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
     <MeasureBar
       style={{
         left,
-        ...(number % 12 === 1
+        ...(mod(number, 12) === 1
           ? { backgroundColor: "#a0f" }
-          : number % 4 === 1
+          : mod(number, 4) === 1
           ? { backgroundColor: "#aaa" }
           : {}),
       }}
