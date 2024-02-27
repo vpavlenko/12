@@ -169,6 +169,8 @@ const CsvLoader: FC<{
 const solos: JazzSolo[] = data;
 
 function App() {
+  // TODO: store selectedSolo via melid and persist to URL:
+  // https://chat.openai.com/share/54d40902-ea4f-4d83-83aa-4cc444198010
   const [selectedSolo, setSelectedSolo] = useState(1);
   const [melodyData, setMelodyData] = useState<MelodyItem[] | null>(null);
   const [beatsData, setBeatsData] = useState<BeatsItem[] | null>(null);
@@ -235,6 +237,11 @@ function App() {
 
   return (
     <>
+      <div style={{ position: "absolute", right: 20 }}>
+        <a href="https://github.com/vpavlenko/12" target="_blank">
+          <div className="octocat" />
+        </a>
+      </div>
       <div style={{ columnCount: 4, columnGap: "20px", width: "100vw" }}>
         {Object.entries(STYLES).map(([style_, years]) => (
           <div
@@ -267,7 +274,10 @@ function App() {
                                 !mergedBadVideos.has(youtube_id)
                             ).length > 0
                               ? {}
-                              : { color: "lightgray" }),
+                              : {
+                                  textDecoration: "line-through",
+                                  color: "#d8d8d8",
+                                }),
                           }}
                           onClick={() => {
                             setSelectedSolo(soloIndex);
@@ -295,7 +305,7 @@ function App() {
                   key={perfIndex}
                   style={{ paddingLeft: "3em", textIndent: "-3em" }}
                 >
-                  <span style={{ fontStyle: "italic" }}>{performer}: </span>
+                  <span style={{ color: "#aaa" }}>{performer}: </span>
                   {titles.reduce(
                     (prev, curr, idx) => (
                       <>
@@ -325,7 +335,7 @@ function App() {
             <span
               style={
                 mergedBadVideos.has(youtube_id)
-                  ? { textDecoration: "line-through" }
+                  ? { color: "#d8d8d8", textDecoration: "line-through" }
                   : youtubeId === youtube_id
                   ? { fontWeight: 700 }
                   : { borderBottom: "1px dotted gray", cursor: "pointer" }
