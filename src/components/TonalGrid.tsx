@@ -21,10 +21,6 @@ const Cursor = styled(VerticalBar)`
   z-index: 1;
 `;
 
-const MeasureBar = styled(VerticalBar)`
-  background-color: #444;
-`;
-
 const BeatBar = styled(VerticalBar)`
   border-left: 1px dashed #262626;
 `;
@@ -35,36 +31,40 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
   number,
   left,
   measureWidth,
-}) => (
-  <>
-    <MeasureBar
-      style={{
-        left,
-        ...(mod(number, 12) === 1
-          ? { backgroundColor: "#a0f" }
-          : mod(number, 4) === 1
-          ? { backgroundColor: "#aaa" }
-          : {}),
-      }}
-    />
-    {measureWidth > 30 &&
-      [1, 2, 3].map((beat) => (
-        <BeatBar style={{ left: left + (beat * measureWidth) / 4 }} />
-      ))}
-    {measureWidth > 30 && (
-      <div
+}) => {
+  const isFullSize = measureWidth > 30;
+
+  const backgroundColor = mod(number, 12) === 1 ? "#a0f"
+                        : mod(number, 4) === 1 ? "#aaa"
+                        : "#444";
+
+  return (
+    <>
+      <VerticalBar
         style={{
-          position: "absolute",
-          left: left + 5,
-          top: 20,
-          color: "white",
+          left,
+          backgroundColor,
         }}
-      >
-        {number}
-      </div>
-    )}
-  </>
-);
+      />
+      {isFullSize &&
+        [1, 2, 3].map((beat) => (
+          <BeatBar style={{ left: left + (beat * measureWidth) / 4 }} />
+        ))}
+      {isFullSize && (
+        <div
+          style={{
+            position: "absolute",
+            left: left + 5,
+            top: 20,
+            color: "white",
+          }}
+        >
+          {number}
+        </div>
+      )}
+    </>
+  )
+};
 
 const TonalGrid: FC<{
   beats: BeatsItem[];
