@@ -85,10 +85,7 @@ const TonalGrid: FC<{
 }) => {
   const startBar = beats[0].bar;
   const endBar = beats.at(-1)!.bar;
-  const measures = Array.from(
-    { length: endBar - startBar + 1 },
-    (_, index) => index + startBar
-  );
+  const measures = Collection.range(startBar, endBar);
 
   const tonicName = key_ ? key_.split("-")[0] : KEYS[0];
   const tonic = KEYS.indexOf(tonicName);
@@ -121,6 +118,27 @@ const TonalGrid: FC<{
         }}
       />
     ));
+
+  const beatsChordNotes: Array<{ onset: number; chordNotes: number[] }> = [];
+  beats.filter(({ beat }) => beat === 1)
+    .forEach(({ chord, onset }) => {
+      if (chord === 'NC') {
+        return;
+      } else if (chord == null) {
+        const last = beatsChordNotes.at(-1)!;
+        beatsChordNotes.push({ ...last, onset });
+      } else {
+        const chordNotes = Collection.range(minOctave, maxOctave)
+          .flatMap(octave =>
+            Chord.notes(chord).map(noteName =>
+              Note.midi(noteName + octave)!
+            )
+          )
+          .filter(midiNumber => (midiNumber >= minMidiNumber && midiNumber <= maxMidiNumber))
+
+        beatsChordNotes.push({ chordNotes, onset });
+      }
+  });
 
   return (
     <div
@@ -173,6 +191,24 @@ const TonalGrid: FC<{
               zIndex: 10,
             }}
           />
+        )
+      )}
+      {beatsChordNotes.flatMap(({ chordNotes, onset }, index) => 
+        chordNotes.map(midiNumber => (
+            <div
+              key={`chord_tone_${index}_${midiNumber}`}
+              className={`noteColor_${(midiNumber - tonic) % 12}_colors`}
+              style={{
+                position: "absolute",
+                width: measureWidth,
+                height: noteHeight,
+                bottom: (midiNumber - minPitch) * noteHeight,
+                left: mapToRelativeTime(onset) * measureWidth,
+                zIndex: 9,
+                opacity: '25%',
+              }}
+            />
+          )
         )
       )}
       {measureWidth > 30 &&
