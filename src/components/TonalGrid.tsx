@@ -104,7 +104,7 @@ const TonalGrid: FC<{
             width: "100%",
             height: 6 * noteHeight,
             left: 0,
-            top: (maxPitch - midiNumber - 6) * noteHeight,
+            bottom: (midiNumber - minPitch) * noteHeight,
             pointerEvents: "none",
             background: `linear-gradient(to top, #222, transparent)`,
             zIndex: 0,
@@ -157,7 +157,7 @@ const TonalGrid: FC<{
                   mapToRelativeTime(onset)) *
                 measureWidth,
               height: noteHeight,
-              top: (maxPitch - pitch - 1) * noteHeight,
+              bottom: (pitch - minPitch) * noteHeight,
               left: mapToRelativeTime(onset) * measureWidth,
               borderRadius: "5px",
               zIndex: 10,
