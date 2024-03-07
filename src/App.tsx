@@ -197,6 +197,9 @@ function App() {
   // TODO: store selectedSolo via melid and persist to URL:
   // https://chat.openai.com/share/54d40902-ea4f-4d83-83aa-4cc444198010
   const [selectedSolo, setSelectedSolo] = useState(1);
+  const [selectedOverlaidSolos, setSelectedOverlaidSolos] = useState(
+    new Set([1])
+  );
   const [melodyData, setMelodyData] = useState<MelodyItem[] | null>(null);
   const [beatsData, setBeatsData] = useState<BeatsItem[] | null>(null);
   const [youtubeId, setYoutubeId] = useState<string | null>("WvKuTS1mBmU");
@@ -224,6 +227,7 @@ function App() {
     });
     return beatsData
       ? (absoluteTime: number) => {
+          const firstBar = isOverlay ? 0 : beatsData[0].bar;
           for (const iAsString in barOnsets) {
             const i = parseInt(iAsString, 10);
             if (!(i - 1 in barOnsets)) {
@@ -235,10 +239,11 @@ function App() {
                 2 +
                 (absoluteTime - barOnsets[i - 1]) /
                   (barOnsets[i] - barOnsets[i - 1]);
+              if (isOverlay && relativeTime < -1) {
+                return -10;
+              }
               return (
-                (isOverlay ? relativeTime % 12 : relativeTime) -
-                beatsData[0].bar +
-                2
+                (isOverlay ? relativeTime % 12 : relativeTime) - firstBar + 2
               );
             }
           }
@@ -292,7 +297,7 @@ function App() {
                   ) => {
                     if (style === style_) {
                       if (!acc[performer]) acc[performer] = [];
-                      acc[performer].push(
+                      const span = (
                         <span
                           key={soloIndex}
                           style={{
@@ -325,6 +330,35 @@ function App() {
                           {title}
                           {solopart > 1 && ` (${solopart})`}
                         </span>
+                      );
+                      acc[performer].push(
+                        isOverlay ? (
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={selectedOverlaidSolos.has(soloIndex)}
+                              onChange={(event) =>
+                                event.target.checked
+                                  ? setSelectedOverlaidSolos(
+                                      new Set([
+                                        ...selectedOverlaidSolos,
+                                        soloIndex,
+                                      ])
+                                    )
+                                  : setSelectedOverlaidSolos(
+                                      new Set(
+                                        [...selectedOverlaidSolos].filter(
+                                          (element) => element !== soloIndex
+                                        )
+                                      )
+                                    )
+                              }
+                            />
+                            {span}
+                          </label>
+                        ) : (
+                          span
+                        )
                       );
                     }
                     return acc;
@@ -407,6 +441,7 @@ function App() {
           noteHeight={2}
           mapToRelativeTime={mapToRelativeTime}
           showChordTones={showChordTones}
+          isOverlay={isOverlay}
         />
       )}
       {beatsData && melodyData && (
@@ -419,6 +454,7 @@ function App() {
           noteHeight={9}
           mapToRelativeTime={mapToRelativeTime}
           showChordTones={showChordTones}
+          isOverlay={isOverlay}
         />
       )}
       {youtubeId && youtubeItem && (

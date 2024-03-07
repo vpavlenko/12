@@ -74,6 +74,7 @@ const TonalGrid: FC<{
   noteHeight: number;
   mapToRelativeTime: (time: number) => number;
   showChordTones: boolean;
+  isOverlay: boolean;
 }> = ({
   beats,
   melody,
@@ -83,6 +84,7 @@ const TonalGrid: FC<{
   noteHeight,
   mapToRelativeTime,
   showChordTones,
+  isOverlay,
 }) => {
   const startBar = beats[0].bar;
   const endBar = beats.at(-1)!.bar;
@@ -190,6 +192,7 @@ const TonalGrid: FC<{
               left: mapToRelativeTime(onset) * measureWidth,
               borderRadius: "5px",
               zIndex: 10,
+              opacity: isOverlay ? 0.7 : 1,
             }}
           />
         )
