@@ -1,7 +1,7 @@
 import { FC } from "react";
 import styled from "styled-components";
 import { BeatsItem, MelodyItem } from "../App";
-import { Progression } from "tonal";
+import { Progression, Chord, Note, Collection } from "tonal";
 
 const mod = (n: number, m: number): number => {
   return ((n % m) + m) % m;
@@ -21,10 +21,6 @@ const Cursor = styled(VerticalBar)`
   z-index: 1;
 `;
 
-const MeasureBar = styled(VerticalBar)`
-  background-color: #444;
-`;
-
 const BeatBar = styled(VerticalBar)`
   border-left: 1px dashed #262626;
 `;
@@ -35,36 +31,40 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
   number,
   left,
   measureWidth,
-}) => (
-  <>
-    <MeasureBar
-      style={{
-        left,
-        ...(mod(number, 12) === 1
-          ? { backgroundColor: "#a0f" }
-          : mod(number, 4) === 1
-          ? { backgroundColor: "#aaa" }
-          : {}),
-      }}
-    />
-    {measureWidth > 30 &&
-      [1, 2, 3].map((beat) => (
-        <BeatBar style={{ left: left + (beat * measureWidth) / 4 }} />
-      ))}
-    {measureWidth > 30 && (
-      <div
+}) => {
+  const isFullSize = measureWidth > 30;
+
+  const backgroundColor = mod(number, 12) === 1 ? "#a0f"
+                        : mod(number, 4) === 1 ? "#aaa"
+                        : "#444";
+
+  return (
+    <>
+      <VerticalBar
         style={{
-          position: "absolute",
-          left: left + 5,
-          top: 20,
-          color: "white",
+          left,
+          backgroundColor,
         }}
-      >
-        {number}
-      </div>
-    )}
-  </>
-);
+      />
+      {isFullSize &&
+        [1, 2, 3].map((beat) => (
+          <BeatBar style={{ left: left + (beat * measureWidth) / 4 }} />
+        ))}
+      {isFullSize && (
+        <div
+          style={{
+            position: "absolute",
+            left: left + 5,
+            top: 20,
+            color: "white",
+          }}
+        >
+          {number}
+        </div>
+      )}
+    </>
+  )
+};
 
 const TonalGrid: FC<{
   beats: BeatsItem[];
@@ -85,33 +85,61 @@ const TonalGrid: FC<{
 }) => {
   const startBar = beats[0].bar;
   const endBar = beats.at(-1)!.bar;
-  const measures = Array.from(
-    { length: endBar - startBar + 1 },
-    (_, index) => index + startBar
-  );
-  const minPitch = Math.min(...melody.map(({ pitch }) => pitch)) - 2;
-  const maxPitch = Math.max(...melody.map(({ pitch }) => pitch)) + 6;
-  const tonic = key_ ? KEYS.indexOf(key_.split("-")[0]) : 0;
-  const octaves = [];
-  for (let octave = 0; octave <= 9; ++octave) {
-    const midiNumber = tonic + octave * 12;
-    if (midiNumber >= minPitch && midiNumber + 4 <= maxPitch)
-      octaves.push(
-        <div
-          key={`tonalgrid_octave_${midiNumber}`}
-          style={{
-            position: "absolute",
-            width: "100%",
-            height: 6 * noteHeight,
-            left: 0,
-            top: (maxPitch - midiNumber - 6) * noteHeight,
-            pointerEvents: "none",
-            background: `linear-gradient(to top, #222, transparent)`,
-            zIndex: 0,
-          }}
-        />
-      );
-  }
+  const measures = Collection.range(startBar, endBar);
+
+  const tonicName = key_ ? key_.split("-")[0] : KEYS[0];
+  const tonic = KEYS.indexOf(tonicName);
+
+  const melodyMidiNumbers = melody.map(({ pitch }) => pitch);
+
+  const minMidiNumber = Math.min(...melodyMidiNumbers);
+  const minOctave = Note.octave(Note.fromMidi(minMidiNumber))!;
+  const minPitch = minMidiNumber - 2;
+
+  const maxMidiNumber = Math.max(...melodyMidiNumbers);
+  const maxOctave = Note.octave(Note.fromMidi(maxMidiNumber))!;
+  const maxPitch = maxMidiNumber + 6;
+
+  const octaves = Collection.range(minOctave, maxOctave)
+    .map(octave => Note.midi(tonicName + octave)!)
+    .filter(midiNumber => midiNumber >= minMidiNumber && midiNumber <= (maxPitch - 4)) // TODO: why -4? compare with maxMidiNumber instead?
+    .map(midiNumber => (
+      <div
+        key={`tonalgrid_octave_${midiNumber}`}
+        style={{
+          position: "absolute",
+          width: "100%",
+          height: 6 * noteHeight,
+          left: 0,
+          bottom: (midiNumber - minPitch) * noteHeight,
+          pointerEvents: "none",
+          background: `linear-gradient(to top, #222, transparent)`,
+          zIndex: 0,
+        }}
+      />
+    ));
+
+  const beatsChordNotes: Array<{ onset: number; chordNotes: number[] }> = [];
+  beats.filter(({ beat }) => beat === 1)
+    .forEach(({ chord, onset }) => {
+      if (chord === 'NC') {
+        return;
+      } else if (chord == null) {
+        const last = beatsChordNotes.at(-1)!;
+        beatsChordNotes.push({ ...last, onset });
+      } else {
+        const chordNotes = Collection.range(minOctave, maxOctave)
+          .flatMap(octave =>
+            Chord.notes(chord).map(noteName =>
+              Note.midi(noteName + octave)!
+            )
+          )
+          .filter(midiNumber => (midiNumber >= minMidiNumber && midiNumber <= maxMidiNumber))
+
+        beatsChordNotes.push({ chordNotes, onset });
+      }
+  });
+
   return (
     <div
       style={{
@@ -157,12 +185,30 @@ const TonalGrid: FC<{
                   mapToRelativeTime(onset)) *
                 measureWidth,
               height: noteHeight,
-              top: (maxPitch - pitch - 1) * noteHeight,
+              bottom: (pitch - minPitch) * noteHeight,
               left: mapToRelativeTime(onset) * measureWidth,
               borderRadius: "5px",
               zIndex: 10,
             }}
           />
+        )
+      )}
+      {beatsChordNotes.flatMap(({ chordNotes, onset }, index) => 
+        chordNotes.map(midiNumber => (
+            <div
+              key={`chord_tone_${index}_${midiNumber}`}
+              className={`noteColor_${(midiNumber - tonic) % 12}_colors`}
+              style={{
+                position: "absolute",
+                width: measureWidth,
+                height: noteHeight,
+                bottom: (midiNumber - minPitch) * noteHeight,
+                left: mapToRelativeTime(onset) * measureWidth,
+                zIndex: 9,
+                opacity: '25%',
+              }}
+            />
+          )
         )
       )}
       {measureWidth > 30 &&
