@@ -203,6 +203,7 @@ function App() {
   const [currentYoutubeTime, setCurrentYoutubeTime] = useState<number>(0);
   const [badVideos, addBadVideo] = useLocalStorageSet("badVideos");
   const [showChordTones, setShowChordTones] = useState<boolean>(true);
+  const [isOverlay, setIsOverlay] = useState<boolean>(false);
   const playerRef = useRef<YouTubePlayer>();
 
   const { style, title, performer, key, instrument, melid } =
@@ -229,18 +230,22 @@ function App() {
               continue;
             }
             if (absoluteTime <= barOnsets[i]) {
-              return (
+              const relativeTime =
                 i -
-                beatsData[0].bar +
+                2 +
                 (absoluteTime - barOnsets[i - 1]) /
-                  (barOnsets[i] - barOnsets[i - 1])
+                  (barOnsets[i] - barOnsets[i - 1]);
+              return (
+                (isOverlay ? relativeTime % 12 : relativeTime) -
+                beatsData[0].bar +
+                2
               );
             }
           }
           return -10;
         }
       : () => 0;
-  }, [beatsData]);
+  }, [beatsData, isOverlay]);
 
   useEffect(() => {
     function updateCurrentTime() {
@@ -348,7 +353,6 @@ function App() {
           </div>
         ))}
       </div>
-
       <div style={{ marginTop: "40px", fontSize: 16 }}>
         A {style.toLowerCase()} solo on{" "}
         <span style={{ color: "darkorange", fontWeight: 700 }}>"{title}"</span>{" "}
@@ -384,7 +388,15 @@ function App() {
         />
         Show Chord Tones
       </label>
-
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      <label>
+        <input
+          type="checkbox"
+          checked={isOverlay}
+          onChange={(event) => setIsOverlay(event.target.checked)}
+        />
+        Overlay
+      </label>
       {beatsData && melodyData && (
         <TonalGrid
           beats={beatsData}

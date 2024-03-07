@@ -124,24 +124,21 @@ const TonalGrid: FC<{
 
   const chordTones: Array<{ onset: number; chordNotes: number[] }> = [];
   if (showChordTones) {
-    beats
-      //   .filter(({ beat }) => beat === 1)
-      .forEach(({ chord, onset }) => {
-        debugger;
-        if (chord === "NC" || chord == null) {
-          return;
-        }
-        const chordNotes = Collection.range(minOctave, maxOctave)
-          .flatMap((octave) =>
-            Chord.notes(chord).map((noteName) => Note.midi(noteName + octave)!)
-          )
-          .filter(
-            (midiNumber) =>
-              midiNumber >= minMidiNumber && midiNumber <= maxMidiNumber
-          );
+    beats.forEach(({ chord, onset }) => {
+      if (chord === "NC" || chord == null) {
+        return;
+      }
+      const chordNotes = Collection.range(minOctave, maxOctave)
+        .flatMap((octave) =>
+          Chord.notes(chord).map((noteName) => Note.midi(noteName + octave)!)
+        )
+        .filter(
+          (midiNumber) =>
+            midiNumber >= minMidiNumber && midiNumber <= maxMidiNumber
+        );
 
-        chordTones.push({ chordNotes, onset });
-      });
+      chordTones.push({ chordNotes, onset });
+    });
   }
 
   return (
