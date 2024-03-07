@@ -34,9 +34,8 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
 }) => {
   const isFullSize = measureWidth > 30;
 
-  const backgroundColor = mod(number, 12) === 1 ? "#a0f"
-                        : mod(number, 4) === 1 ? "#aaa"
-                        : "#444";
+  const backgroundColor =
+    mod(number, 12) === 1 ? "#a0f" : mod(number, 4) === 1 ? "#aaa" : "#444";
 
   return (
     <>
@@ -63,7 +62,7 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
         </div>
       )}
     </>
-  )
+  );
 };
 
 const TonalGrid: FC<{
@@ -74,6 +73,7 @@ const TonalGrid: FC<{
   measureWidth: number;
   noteHeight: number;
   mapToRelativeTime: (time: number) => number;
+  showChordTones: boolean;
 }> = ({
   beats,
   melody,
@@ -82,6 +82,7 @@ const TonalGrid: FC<{
   measureWidth,
   noteHeight,
   mapToRelativeTime,
+  showChordTones,
 }) => {
   const startBar = beats[0].bar;
   const endBar = beats.at(-1)!.bar;
@@ -101,9 +102,11 @@ const TonalGrid: FC<{
   const maxPitch = maxMidiNumber + 6;
 
   const octaves = Collection.range(minOctave, maxOctave)
-    .map(octave => Note.midi(tonicName + octave)!)
-    .filter(midiNumber => midiNumber >= minMidiNumber && midiNumber <= (maxPitch - 4)) // TODO: why -4? compare with maxMidiNumber instead?
-    .map(midiNumber => (
+    .map((octave) => Note.midi(tonicName + octave)!)
+    .filter(
+      (midiNumber) => midiNumber >= minMidiNumber && midiNumber <= maxPitch - 4
+    ) // TODO: why -4? compare with maxMidiNumber instead?
+    .map((midiNumber) => (
       <div
         key={`tonalgrid_octave_${midiNumber}`}
         style={{
@@ -119,26 +122,27 @@ const TonalGrid: FC<{
       />
     ));
 
-  const beatsChordNotes: Array<{ onset: number; chordNotes: number[] }> = [];
-  beats.filter(({ beat }) => beat === 1)
-    .forEach(({ chord, onset }) => {
-      if (chord === 'NC') {
-        return;
-      } else if (chord == null) {
-        const last = beatsChordNotes.at(-1)!;
-        beatsChordNotes.push({ ...last, onset });
-      } else {
+  const chordTones: Array<{ onset: number; chordNotes: number[] }> = [];
+  if (showChordTones) {
+    beats
+      //   .filter(({ beat }) => beat === 1)
+      .forEach(({ chord, onset }) => {
+        debugger;
+        if (chord === "NC" || chord == null) {
+          return;
+        }
         const chordNotes = Collection.range(minOctave, maxOctave)
-          .flatMap(octave =>
-            Chord.notes(chord).map(noteName =>
-              Note.midi(noteName + octave)!
-            )
+          .flatMap((octave) =>
+            Chord.notes(chord).map((noteName) => Note.midi(noteName + octave)!)
           )
-          .filter(midiNumber => (midiNumber >= minMidiNumber && midiNumber <= maxMidiNumber))
+          .filter(
+            (midiNumber) =>
+              midiNumber >= minMidiNumber && midiNumber <= maxMidiNumber
+          );
 
-        beatsChordNotes.push({ chordNotes, onset });
-      }
-  });
+        chordTones.push({ chordNotes, onset });
+      });
+  }
 
   return (
     <div
@@ -160,7 +164,7 @@ const TonalGrid: FC<{
             }}
           />
         )}
-      {octaves}
+      {!showChordTones && octaves}
       {beats
         .filter(({ beat }) => beat === 1)
         .map(({ bar, onset }) => (
@@ -193,23 +197,27 @@ const TonalGrid: FC<{
           />
         )
       )}
-      {beatsChordNotes.flatMap(({ chordNotes, onset }, index) => 
-        chordNotes.map(midiNumber => (
-            <div
-              key={`chord_tone_${index}_${midiNumber}`}
-              className={`noteColor_${(midiNumber - tonic) % 12}_colors`}
-              style={{
-                position: "absolute",
-                width: measureWidth,
-                height: noteHeight,
-                bottom: (midiNumber - minPitch) * noteHeight,
-                left: mapToRelativeTime(onset) * measureWidth,
-                zIndex: 9,
-                opacity: '25%',
-              }}
-            />
-          )
-        )
+      {chordTones.flatMap(({ chordNotes, onset }, index) =>
+        chordNotes.map((midiNumber) => (
+          <div
+            key={`chord_tone_${index}_${midiNumber}`}
+            className={`noteColor_${(midiNumber - tonic) % 12}_colors`}
+            style={{
+              position: "absolute",
+              width:
+                index + 1 < chordTones.length
+                  ? (mapToRelativeTime(chordTones[index + 1].onset) -
+                      mapToRelativeTime(chordTones[index].onset)) *
+                    measureWidth
+                  : measureWidth,
+              height: noteHeight,
+              bottom: (midiNumber - minPitch) * noteHeight,
+              left: mapToRelativeTime(onset) * measureWidth,
+              zIndex: 9,
+              opacity: "25%",
+            }}
+          />
+        ))
       )}
       {measureWidth > 30 &&
         beats

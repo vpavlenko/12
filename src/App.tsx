@@ -202,6 +202,7 @@ function App() {
   const [youtubeId, setYoutubeId] = useState<string | null>("WvKuTS1mBmU");
   const [currentYoutubeTime, setCurrentYoutubeTime] = useState<number>(0);
   const [badVideos, addBadVideo] = useLocalStorageSet("badVideos");
+  const [showChordTones, setShowChordTones] = useState<boolean>(true);
   const playerRef = useRef<YouTubePlayer>();
 
   const { style, title, performer, key, instrument, melid } =
@@ -375,6 +376,15 @@ function App() {
           </Fragment>
         ))}
       </div>
+      <label>
+        <input
+          type="checkbox"
+          checked={showChordTones}
+          onChange={(event) => setShowChordTones(event.target.checked)}
+        />
+        Show Chord Tones
+      </label>
+
       {beatsData && melodyData && (
         <TonalGrid
           beats={beatsData}
@@ -384,6 +394,7 @@ function App() {
           measureWidth={25}
           noteHeight={2}
           mapToRelativeTime={mapToRelativeTime}
+          showChordTones={showChordTones}
         />
       )}
       {beatsData && melodyData && (
@@ -395,6 +406,7 @@ function App() {
           measureWidth={100}
           noteHeight={9}
           mapToRelativeTime={mapToRelativeTime}
+          showChordTones={showChordTones}
         />
       )}
       {youtubeId && youtubeItem && (
