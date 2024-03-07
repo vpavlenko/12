@@ -1,6 +1,6 @@
-import { FC } from "react";
+import { FC, useMemo } from "react";
 import styled from "styled-components";
-import { BeatsItem, MelodyItem } from "../App";
+import { BeatsItem, MelodyItem, beatsStorage, melodyStorage } from "../App";
 import { Progression, Chord, Note, Collection } from "tonal";
 
 const mod = (n: number, m: number): number => {
@@ -66,26 +66,61 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
 };
 
 const TonalGrid: FC<{
-  beats: BeatsItem[];
-  melody: MelodyItem[];
+  selectedSolo: number;
+  selectedOverlaidSolos: Set<number>;
   key_: string;
   currentYoutubeTime: number;
   measureWidth: number;
   noteHeight: number;
-  mapToRelativeTime: (time: number) => number;
   showChordTones: boolean;
   isOverlay: boolean;
 }> = ({
-  beats,
-  melody,
+  selectedSolo,
+  selectedOverlaidSolos,
   key_,
   currentYoutubeTime,
   measureWidth,
   noteHeight,
-  mapToRelativeTime,
   showChordTones,
   isOverlay,
 }) => {
+  const beats = beatsStorage[selectedSolo];
+  const melody = melodyStorage[selectedSolo];
+
+  const mapToRelativeTime = useMemo(() => {
+    const barOnsets: { [key: number]: number } = {};
+    beats?.forEach(({ bar, beat, onset }) => {
+      if (beat === 1) {
+        barOnsets[bar] = onset;
+      }
+    });
+    return beats
+      ? (absoluteTime: number) => {
+          const firstBar = isOverlay ? 0 : beats[0].bar;
+          for (const iAsString in barOnsets) {
+            const i = parseInt(iAsString, 10);
+            if (!(i - 1 in barOnsets)) {
+              continue;
+            }
+            if (absoluteTime <= barOnsets[i]) {
+              const relativeTime =
+                i -
+                2 +
+                (absoluteTime - barOnsets[i - 1]) /
+                  (barOnsets[i] - barOnsets[i - 1]);
+              if (isOverlay && relativeTime < -1) {
+                return -10;
+              }
+              return (
+                (isOverlay ? relativeTime % 12 : relativeTime) - firstBar + 2
+              );
+            }
+          }
+          return -10;
+        }
+      : () => 0;
+  }, [beats, isOverlay]);
+
   const startBar = beats[0].bar;
   const endBar = beats.at(-1)!.bar;
   const measures = Collection.range(startBar, endBar);
