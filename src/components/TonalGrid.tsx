@@ -1,7 +1,7 @@
 import { FC, useMemo } from "react";
 import styled from "styled-components";
-import { BeatsItem, MelodyItem, beatsStorage, melodyStorage } from "../App";
 import { Progression, Chord, Note, Collection } from "tonal";
+import { BeatsStorage, MelodyStorage, solos } from "../App";
 
 const mod = (n: number, m: number): number => {
   return ((n % m) + m) % m;
@@ -66,69 +66,94 @@ const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
 };
 
 const TonalGrid: FC<{
-  selectedSolo: number;
-  selectedOverlaidSolos: Set<number>;
+  selectedSolos: number[];
   key_: string;
   currentYoutubeTime: number;
   measureWidth: number;
   noteHeight: number;
   showChordTones: boolean;
   isOverlay: boolean;
+  melodyStorage: MelodyStorage;
+  beatsStorage: BeatsStorage;
 }> = ({
-  selectedSolo,
-  selectedOverlaidSolos,
+  selectedSolos,
   key_,
   currentYoutubeTime,
   measureWidth,
   noteHeight,
   showChordTones,
   isOverlay,
+  melodyStorage,
+  beatsStorage,
 }) => {
-  const beats = beatsStorage[selectedSolo];
-  const melody = melodyStorage[selectedSolo];
+  const beats = beatsStorage[selectedSolos[0]];
+  //   const melody = melodyStorage[selectedSolos[0]];
 
-  const mapToRelativeTime = useMemo(() => {
-    const barOnsets: { [key: number]: number } = {};
-    beats?.forEach(({ bar, beat, onset }) => {
-      if (beat === 1) {
-        barOnsets[bar] = onset;
-      }
-    });
-    return beats
-      ? (absoluteTime: number) => {
-          const firstBar = isOverlay ? 0 : beats[0].bar;
-          for (const iAsString in barOnsets) {
-            const i = parseInt(iAsString, 10);
-            if (!(i - 1 in barOnsets)) {
-              continue;
-            }
-            if (absoluteTime <= barOnsets[i]) {
-              const relativeTime =
-                i -
-                2 +
-                (absoluteTime - barOnsets[i - 1]) /
-                  (barOnsets[i] - barOnsets[i - 1]);
-              if (isOverlay && relativeTime < -1) {
-                return -10;
-              }
-              return (
-                (isOverlay ? relativeTime % 12 : relativeTime) - firstBar + 2
-              );
-            }
+  // Every melody should store its own tonic. Everything should be mapped in a relative space, not in midiPitches. Easiest way: subtract tonic difference between tonic[0] and tonic[i]
+  const melodies = useMemo(
+    () =>
+      selectedSolos.map((solo) => {
+        const beats = beatsStorage[solo];
+        const barOnsets: { [key: number]: number } = {};
+        beats?.forEach(({ bar, beat, onset }) => {
+          if (beat === 1) {
+            barOnsets[bar] = onset;
           }
-          return -10;
-        }
-      : () => 0;
-  }, [beats, isOverlay]);
+        });
+        const mapToRelativeTime = beats
+          ? (absoluteTime: number) => {
+              const firstBar = isOverlay ? 0 : beats[0].bar;
+              for (const iAsString in barOnsets) {
+                const i = parseInt(iAsString, 10);
+                if (!(i - 1 in barOnsets)) {
+                  continue;
+                }
+                if (absoluteTime <= barOnsets[i]) {
+                  const relativeTime =
+                    i -
+                    2 +
+                    (absoluteTime - barOnsets[i - 1]) /
+                      (barOnsets[i] - barOnsets[i - 1]);
+                  if (isOverlay && relativeTime < -1) {
+                    return -10;
+                  }
+                  return (
+                    (isOverlay ? relativeTime % 12 : relativeTime) -
+                    firstBar +
+                    2
+                  );
+                }
+              }
+              return -10;
+            }
+          : () => 0;
+
+        const melody = melodyStorage[solo] ?? [];
+        const tonicName = solos[solo].key.split("-")[0];
+        const tonic = Math.min(
+          ...melody
+            .map(({ pitch }) => pitch)
+            .filter((pitch) => pitch % 12 === KEYS.indexOf(tonicName))
+        );
+        return {
+          melody,
+          tonicName,
+          tonic,
+          mapToRelativeTime,
+        };
+      }),
+    [melodyStorage, beatsStorage, selectedSolos, isOverlay]
+  );
+
+  const firstMapToRelativeTime = melodies[0]?.mapToRelativeTime ?? (() => 0);
 
   const startBar = beats[0].bar;
   const endBar = beats.at(-1)!.bar;
   const measures = Collection.range(startBar, endBar);
 
-  const tonicName = key_ ? key_.split("-")[0] : KEYS[0];
-  const tonic = KEYS.indexOf(tonicName);
-
-  const melodyMidiNumbers = melody.map(({ pitch }) => pitch);
+  const melodyMidiNumbers = melodies.flatMap(({ melody }) =>
+    melody?.map(({ pitch }) => pitch)
+  );
 
   const minMidiNumber = Math.min(...melodyMidiNumbers);
   const minOctave = Note.octave(Note.fromMidi(minMidiNumber))!;
@@ -139,7 +164,7 @@ const TonalGrid: FC<{
   const maxPitch = maxMidiNumber + 6;
 
   const octaves = Collection.range(minOctave, maxOctave)
-    .map((octave) => Note.midi(tonicName + octave)!)
+    .map((octave) => Note.midi(melodies[0]?.tonicName + octave)!)
     .filter(
       (midiNumber) => midiNumber >= minMidiNumber && midiNumber <= maxPitch - 4
     ) // TODO: why -4? compare with maxMidiNumber instead?
@@ -178,6 +203,8 @@ const TonalGrid: FC<{
     });
   }
 
+  console.log("melodies", melodies);
+
   return (
     <div
       style={{
@@ -194,11 +221,11 @@ const TonalGrid: FC<{
         !isNaN(currentYoutubeTime) && (
           <Cursor
             style={{
-              left: mapToRelativeTime(currentYoutubeTime) * measureWidth,
+              left: firstMapToRelativeTime(currentYoutubeTime) * measureWidth,
             }}
           />
         )}
-      {!showChordTones && octaves}
+      {false && !showChordTones && octaves}
       {beats
         .filter(({ beat }) => beat === 1)
         .map(({ bar, onset }) => (
@@ -206,55 +233,62 @@ const TonalGrid: FC<{
             <Measure
               key={bar}
               number={bar}
-              left={mapToRelativeTime(onset) * measureWidth}
+              left={firstMapToRelativeTime(onset) * measureWidth}
               measureWidth={measureWidth}
             />
           </>
         ))}
-      {melody.map(({ pitch, onset, duration }, index) =>
-        isNaN(pitch) ? null : (
-          <div
-            key={index}
-            className={`noteColor_${(pitch - tonic) % 12}_colors`}
-            style={{
-              position: "absolute",
-              width:
-                (mapToRelativeTime(onset + duration) -
-                  mapToRelativeTime(onset)) *
-                measureWidth,
-              height: noteHeight,
-              bottom: (pitch - minPitch) * noteHeight,
-              left: mapToRelativeTime(onset) * measureWidth,
-              borderRadius: "5px",
-              zIndex: 10,
-              opacity: isOverlay ? 0.7 : 1,
-            }}
-          />
+      {melodies.flatMap(({ melody, tonic, mapToRelativeTime }) =>
+        melody.map(({ pitch, onset, duration }, index) =>
+          isNaN(pitch) ? null : (
+            <div
+              key={index}
+              className={`noteColor_${(pitch - tonic) % 12}_colors`}
+              style={{
+                position: "absolute",
+                width:
+                  (mapToRelativeTime(onset + duration) -
+                    mapToRelativeTime(onset)) *
+                  measureWidth,
+                height: noteHeight,
+                bottom:
+                  (pitch - minPitch - (tonic - melodies[0].tonic)) * noteHeight,
+                left: mapToRelativeTime(onset) * measureWidth,
+                borderRadius: "5px",
+                zIndex: 10,
+                opacity: isOverlay ? 0.3 : 1,
+              }}
+            />
+          )
         )
       )}
-      {chordTones.flatMap(({ chordNotes, onset }, index) =>
-        chordNotes.map((midiNumber) => (
-          <div
-            key={`chord_tone_${index}_${midiNumber}`}
-            className={`noteColor_${(midiNumber - tonic) % 12}_colors`}
-            style={{
-              position: "absolute",
-              width:
-                index + 1 < chordTones.length
-                  ? (mapToRelativeTime(chordTones[index + 1].onset) -
-                      mapToRelativeTime(chordTones[index].onset)) *
-                    measureWidth
-                  : measureWidth,
-              height: noteHeight,
-              bottom: (midiNumber - minPitch) * noteHeight,
-              left: mapToRelativeTime(onset) * measureWidth,
-              zIndex: 9,
-              opacity: "25%",
-            }}
-          />
-        ))
-      )}
-      {measureWidth > 30 &&
+      {!isOverlay &&
+        chordTones.flatMap(({ chordNotes, onset }, index) =>
+          chordNotes.map((midiNumber) => (
+            <div
+              key={`chord_tone_${index}_${midiNumber}`}
+              className={`noteColor_${
+                (midiNumber - melodies[0].tonic) % 12
+              }_colors`}
+              style={{
+                position: "absolute",
+                width:
+                  index + 1 < chordTones.length
+                    ? (firstMapToRelativeTime(chordTones[index + 1].onset) -
+                        firstMapToRelativeTime(chordTones[index].onset)) *
+                      measureWidth
+                    : measureWidth,
+                height: noteHeight,
+                bottom: (midiNumber - minPitch) * noteHeight,
+                left: firstMapToRelativeTime(onset) * measureWidth,
+                zIndex: 9,
+                opacity: "25%",
+              }}
+            />
+          ))
+        )}
+      {!isOverlay &&
+        measureWidth > 30 &&
         beats
           .filter(({ chord }) => chord)
           .map(({ onset, chord }, index) => {
@@ -263,7 +297,7 @@ const TonalGrid: FC<{
                 key={index}
                 style={{
                   position: "absolute",
-                  left: mapToRelativeTime(onset) * measureWidth + 5,
+                  left: firstMapToRelativeTime(onset) * measureWidth + 5,
                   color: "yellow",
                 }}
               >

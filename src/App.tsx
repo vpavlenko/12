@@ -2,6 +2,7 @@ import {
   FC,
   Fragment,
   ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -124,14 +125,19 @@ export type BeatsItem = {
   chord: string;
 };
 
+export type MelodyStorage = {
+  [key: number]: MelodyItem[];
+};
+
+export type BeatsStorage = {
+  [key: number]: BeatsItem[];
+};
+
 export type Note = {
   onset: number;
   duration: number;
   pitch: number;
 };
-
-export const melodyStorage: { [key: number]: MelodyItem[] } = {};
-export const beatsStorage: { [key: number]: BeatsItem[] } = {};
 
 const makeFileName = ({ title, performer, solopart }: JazzSolo) =>
   performer.replace(/\./g, "").replace(/ /g, "") +
@@ -176,7 +182,7 @@ const CsvLoader: FC<{
   );
 };
 
-const solos: JazzSolo[] = data;
+export const solos: JazzSolo[] = data;
 
 const CollapsibleDiv: FC<{ title: string; children?: ReactNode }> = ({
   title,
@@ -203,6 +209,29 @@ function App() {
   const [selectedOverlaidSolos, setSelectedOverlaidSolos] = useState(
     new Set([1])
   );
+  // const selectedSolo = Math.min(...selectedOverlaidSolos);
+
+  const [melodyStorage, setMelodyStorage] = useState<MelodyStorage>({});
+  const [beatsStorage, setBeatsStorage] = useState<BeatsStorage>({});
+  const updateMelodyStorage = useCallback(
+    (selectedSolo: number, data: MelodyItem[]) => {
+      setMelodyStorage((prevState) => ({
+        ...prevState,
+        [selectedSolo]: data,
+      }));
+    },
+    []
+  );
+  const updateBeatsStorage = useCallback(
+    (selectedSolo: number, data: BeatsItem[]) => {
+      setBeatsStorage((prevState) => ({
+        ...prevState,
+        [selectedSolo]: data,
+      }));
+    },
+    []
+  );
+
   const melodyData = melodyStorage[selectedSolo];
   const beatsData = beatsStorage[selectedSolo];
   const [youtubeId, setYoutubeId] = useState<string | null>("WvKuTS1mBmU");
@@ -285,6 +314,9 @@ function App() {
                                 }),
                           }}
                           onClick={() => {
+                            if (!isOverlay) {
+                              setSelectedOverlaidSolos(new Set([soloIndex]));
+                            }
                             setSelectedSolo(soloIndex);
                             setYoutubeId(
                               youtubeVideos[solos[soloIndex].melid]?.filter(
@@ -306,7 +338,6 @@ function App() {
                               checked={selectedOverlaidSolos.has(soloIndex)}
                               onChange={(event) => {
                                 if (event.target.checked) {
-                                  setSelectedSolo(soloIndex);
                                   setSelectedOverlaidSolos(
                                     new Set([
                                       ...selectedOverlaidSolos,
@@ -314,13 +345,14 @@ function App() {
                                     ])
                                   );
                                 } else {
-                                  setSelectedOverlaidSolos(
-                                    new Set(
-                                      [...selectedOverlaidSolos].filter(
-                                        (element) => element !== soloIndex
-                                      )
-                                    )
-                                  );
+                                  if (selectedOverlaidSolos.size > 1) {
+                                    const newSolos = [
+                                      ...selectedOverlaidSolos,
+                                    ].filter(
+                                      (element) => element !== soloIndex
+                                    );
+                                    setSelectedOverlaidSolos(new Set(newSolos));
+                                  }
                                 }
                               }}
                             />
@@ -401,29 +433,17 @@ function App() {
         />
         Overlay
       </label>
-      {/* {beatsData && melodyData && (
-        <TonalGrid
-          beats={beatsData}
-          melody={melodyData}
-          key_={solos[selectedSolo].key}
-          currentYoutubeTime={currentYoutubeTime + 0.05}
-          measureWidth={25}
-          noteHeight={2}
-          mapToRelativeTime={mapToRelativeTime}
-          showChordTones={showChordTones}
-          isOverlay={isOverlay}
-        />
-      )} */}
       {beatsData && melodyData && (
         <TonalGrid
-          selectedSolo={selectedSolo}
-          selectedOverlaidSolos={selectedOverlaidSolos}
+          selectedSolos={[...selectedOverlaidSolos]}
           key_={solos[selectedSolo].key}
           currentYoutubeTime={currentYoutubeTime + 0.05}
           measureWidth={100}
           noteHeight={9}
           showChordTones={showChordTones}
           isOverlay={isOverlay}
+          melodyStorage={melodyStorage}
+          beatsStorage={beatsStorage}
         />
       )}
       {youtubeId && youtubeItem && (
@@ -449,11 +469,11 @@ function App() {
       <div style={{ marginTop: 200 }}>
         <CsvLoader
           filePath={`csv_melody/${makeFileName(solos[selectedSolo])}`}
-          setData={(data) => (melodyStorage[selectedSolo] = data)}
+          setData={(data) => updateMelodyStorage(selectedSolo, data)}
         />
         <CsvLoader
           filePath={`csv_beats/${makeFileName(solos[selectedSolo])}`}
-          setData={(data) => (beatsStorage[selectedSolo] = data)}
+          setData={(data) => updateBeatsStorage(selectedSolo, data)}
         />
       </div>
     </>
