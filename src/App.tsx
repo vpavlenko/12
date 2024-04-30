@@ -421,7 +421,7 @@ function App() {
           key_={solos[selectedSolo].key}
           currentYoutubeTime={currentYoutubeTime + 0.05}
           measureWidth={100}
-          noteHeight={9}
+          noteHeight={6}
           showChordTones={showChordTones}
           isOverlay={isOverlay}
         />

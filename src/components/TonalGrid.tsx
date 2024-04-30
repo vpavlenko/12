@@ -222,7 +222,7 @@ const TonalGrid: FC<{
                 (mapToRelativeTime(onset + duration) -
                   mapToRelativeTime(onset)) *
                 measureWidth,
-              height: noteHeight,
+              height: noteHeight * 2,
               bottom: (pitch - minPitch) * noteHeight,
               left: mapToRelativeTime(onset) * measureWidth,
               borderRadius: "5px",
@@ -245,11 +245,11 @@ const TonalGrid: FC<{
                       mapToRelativeTime(chordTones[index].onset)) *
                     measureWidth
                   : measureWidth,
-              height: noteHeight,
+              height: noteHeight * 2,
               bottom: (midiNumber - minPitch) * noteHeight,
               left: mapToRelativeTime(onset) * measureWidth,
               zIndex: 9,
-              opacity: "25%",
+              opacity: "20%",
             }}
           />
         ))
