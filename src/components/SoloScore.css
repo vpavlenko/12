@@ -1,34 +1,34 @@
-.tonal-grid-container {
+.solo-score-container {
   margin: 14px 0;
 }
 
-.tonal-grid-section + .tonal-grid-section {
+.solo-score-section + .solo-score-section {
   margin-block-start: var(--rawln-section-gap);
 }
 
-.tonal-grid-scroll {
+.solo-score-scroll {
   overflow-x: auto;
   min-width: 0;
   padding-block: 1px;
   touch-action: pan-x pan-y;
 }
 
-.tonal-grid-harmony-viewport {
+.solo-score-harmony-viewport {
   overflow: hidden;
   background: #000;
 }
 
-.tonal-grid-sticky-harmony {
+.solo-score-sticky-harmony {
   position: sticky;
   top: 0;
   z-index: 18;
 }
 
-.tonal-grid .rawln-measure-number {
+.solo-score .rawln-measure-number {
   top: 3px;
 }
 
-.tonal-grid-harmony {
+.solo-score-harmony {
   position: relative;
   min-height: 30px;
   pointer-events: none;
@@ -38,11 +38,11 @@
   line-height: 1.2;
 }
 
-.tonal-grid-harmony-count-in {
+.solo-score-harmony-count-in {
   min-height: 33px;
 }
 
-.tonal-grid-count-in {
+.solo-score-count-in {
   position: absolute;
   inset: 0 0 auto;
   height: 2px;
@@ -50,7 +50,7 @@
   transform-origin: left;
 }
 
-.tonal-grid-chord {
+.solo-score-chord {
   position: absolute;
   bottom: 0;
   transform-origin: left bottom;

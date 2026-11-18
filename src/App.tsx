@@ -14,7 +14,7 @@ import { ScoreSizeSliders } from "librawl/components";
 import { PITCH_STEP } from "librawl/geometry";
 import "librawl/score-size-sliders.css";
 import Papa from "papaparse";
-import TonalGrid, { DEFAULT_TIME_SPACING } from "./components/TonalGrid";
+import SoloScore, { DEFAULT_TIME_SPACING } from "./components/SoloScore";
 import { SoloAudio, type AudioExcerpt } from "./components/SoloPlayback";
 import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
@@ -248,7 +248,7 @@ function App() {
           </div>
         </header>
         {score && <>
-          <TonalGrid
+          <SoloScore
             key={fileName}
             score={score}
             changes={changes}

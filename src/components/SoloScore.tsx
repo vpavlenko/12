@@ -7,7 +7,7 @@ import "librawl/style.css";
 import "librawl/native.css";
 import "librawl/roman-numerals.css";
 import { countInProgressAt, type TonalScore } from "../tonalScore";
-import "./TonalGrid.css";
+import "./SoloScore.css";
 
 export const DEFAULT_TIME_SPACING = 25;
 
@@ -90,7 +90,7 @@ function HarmonyHeader({ score, row, playbackPosition }: {
 
   useLayoutEffect(() => {
     const header = ref.current!;
-    const labels = Array.from(header.querySelectorAll<HTMLElement>(".tonal-grid-chord"));
+    const labels = Array.from(header.querySelectorAll<HTMLElement>(".solo-score-chord"));
     const arrange = () => {
       const width = header.clientWidth;
       if (!width || !labels.length) return;
@@ -111,10 +111,10 @@ function HarmonyHeader({ score, row, playbackPosition }: {
   }, [chords]);
 
   return (
-    <div className={hasCountIn ? "tonal-grid-harmony tonal-grid-harmony-count-in" : "tonal-grid-harmony"} ref={ref} style={row.style}>
-      {hasCountIn && <div className="tonal-grid-count-in" ref={progressLine} aria-hidden="true" hidden />}
+    <div className={hasCountIn ? "solo-score-harmony solo-score-harmony-count-in" : "solo-score-harmony"} ref={ref} style={row.style}>
+      {hasCountIn && <div className="solo-score-count-in" ref={progressLine} aria-hidden="true" hidden />}
       {chords.map(({ start, label, rootPitch, bassPitch, tooltip }) => (
-        <div className="tonal-grid-chord" key={start} style={{ left: `calc(${percentOf(row, start)} + 5px)` }}>
+        <div className="solo-score-chord" key={start} style={{ left: `calc(${percentOf(row, start)} + 5px)` }}>
           <RomanNumeral notation={label} options={{ jazz: true, font: "sans-serif", rootPitch, bassPitch }} tooltip={tooltip ?? true} />
         </div>
       ))}
@@ -170,9 +170,9 @@ function ScoreSection({
     return () => observer.disconnect();
   }, []);
   return (
-    <div className="tonal-grid-section">
+    <div className="solo-score-section">
       <div
-        className={stickyHarmony ? "tonal-grid-harmony-viewport tonal-grid-sticky-harmony" : "tonal-grid-harmony-viewport"}
+        className={stickyHarmony ? "solo-score-harmony-viewport solo-score-sticky-harmony" : "solo-score-harmony-viewport"}
         ref={harmonyViewportRef}
         onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft, containerRef.current)}
       >
@@ -181,14 +181,14 @@ function ScoreSection({
         </div>
       </div>
       <div
-        className="tonal-grid-scroll"
+        className="solo-score-scroll"
         ref={containerRef}
         onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft, harmonyViewportRef.current)}
       >
         <ScorePinchContent activeRef={pinchActive} fitWidth>
           <RawlNotation
             {...notation}
-            className="tonal-grid"
+            className="solo-score"
             style={{ width: scoreWidth }}
             rows={rows}
           />
@@ -198,7 +198,7 @@ function ScoreSection({
   );
 }
 
-export default function TonalGrid({
+export default function SoloScore({
   changes, onChangesChange, playback, playbackPosition, onSeek, ...sizing
 }: Props) {
   const { score, noteHeight } = sizing;
@@ -233,7 +233,7 @@ export default function TonalGrid({
   };
 
   return (
-    <div className="tonal-grid-container">
+    <div className="solo-score-container">
       {pickup && <ScoreSection {...sizing} rows={pickup.rows} scoreWidth={scoreWidth(pickup.width)} notation={notation} />}
       <ScoreSection {...sizing} rows={choruses.rows} scoreWidth={scoreWidth(choruses.width)} notation={notation} playbackPosition={playbackPosition} stickyHarmony />
     </div>
