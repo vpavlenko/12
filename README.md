@@ -12,3 +12,37 @@ AND solo_info.key LIKE '%maj';
 ```
 
 on [wjazzd.db](https://jazzomat.hfm-weimar.de/dbformat/dboverview.html)
+
+[Recording metadata](data/wjd_recordings.json) and [annotations](public/wjd) come from the
+[Weimar Jazz Database v2.1](https://jazzomat.hfm-weimar.de/download/download.html)
+(SQLite version 2.2, ODbL). Join `solo_info.trackid` to `track_info.trackid`
+and take the single calendar year in `track_info.recordingdate` for each `melid`.
+The info icon beneath each roll opens its recording and transcription metadata.
+Each solo has a shareable `#solo-<melid>` link.
+To regenerate the metadata from the official SQLite download, run
+`python3 scripts/export-wjd.py /path/to/wjazzd.db`.
+
+## Recordings
+
+Each solo plays the matching AAC excerpt from `public/audio/`.
+[Playback metadata](data/playback.json) records each excerpt’s source video ID
+and trim points. The player converts audio time to score time using the clip’s
+score start and the number of recording seconds per score second. These values
+were fit against the Weimar Jazz Database melody at several points in each solo
+to account for both lead-in and transfer speed. The roll uses Weimar’s
+transcribed note times and annotated beat times directly. Measure widths can
+vary within a chorus. The footer uses the same note spans and committed tonic
+changes, converted to the excerpt's clock.
+
+The roll, Roman numeral tooltips, Piano Legend, size sliders, and fixed
+playback bar use librawl.
+The vendored package is based on v0.3.5 with a
+[source patch](vendor/librawl-roll.patch) for these components, annotated beat
+positions, and recording-time playback spans. This app owns the audio element and maps
+its clock to the score and playback thumb. The sliders sit in the lower-right
+corner. Use A/D to adjust time spacing and W/S to adjust note height.
+The Piano Legend uses the credited [Salamander piano samples](public/piano/NOTICE.txt).
+
+Only the librawl archive pinned in `package.json` belongs in Git. When updating
+the pin, stage the new archive with `git add -f` and remove the previous archive
+from the Git index.

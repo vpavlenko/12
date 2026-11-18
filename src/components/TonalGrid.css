@@ -1,0 +1,46 @@
+.tonal-grid-container {
+  margin: 14px 0;
+}
+
+.tonal-grid-section + .tonal-grid-section {
+  margin-block-start: var(--rawln-section-gap);
+}
+
+.tonal-grid-scroll {
+  overflow-x: auto;
+  min-width: 0;
+  padding-block: 1px;
+  touch-action: pan-x pan-y;
+}
+
+.tonal-grid-harmony-viewport {
+  overflow: hidden;
+  background: #000;
+}
+
+.tonal-grid-sticky-harmony {
+  position: sticky;
+  top: 0;
+  z-index: 18;
+}
+
+.tonal-grid .rawln-measure-number {
+  top: 3px;
+}
+
+.tonal-grid-harmony {
+  position: relative;
+  min-height: 30px;
+  pointer-events: none;
+  overflow: hidden;
+  color: #aaa;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.tonal-grid-chord {
+  position: absolute;
+  bottom: 0;
+  transform-origin: left bottom;
+  white-space: nowrap;
+}

@@ -1,0 +1,3798 @@
+diff --git a/integrations/caplin/playback-measure.mjs b/integrations/caplin/playback-measure.mjs
+new file mode 100644
+index 0000000..07aecf7
+--- /dev/null
++++ b/integrations/caplin/playback-measure.mjs
+@@ -0,0 +1,78 @@
++// The legacy readers own the audio clock and the row grid. Keep the bridge
++// in score beats, so repeats, pickup offsets, and audio alignment stay intact.
++import {findPlaybackMeasure} from '../../src/rawlnative/playbackIndex.ts';
++
++const rowsByScore = new WeakMap();
++
++export function caplinPlaybackMeasures(model, data) {
++  const grid = data.structure?.notatedBars;
++  const starts = grid?.starts ?? data.groups ?? data.measures?.map(measure => measure.start) ?? [];
++  const labels = grid?.measureLabels ?? data.measureLabels ?? data.measures?.map(measure => measure.label);
++  const {row, secondsPerBeat, toX} = model;
++  const percent = beat => toX(beat * secondsPerBeat, 100);
++  return starts.flatMap((start, index) => {
++    const from = Math.max(row.start, start);
++    const to = Math.min(row.end, starts[index + 1] ?? data.beats);
++    if (!(to > from)) return [];
++    return [{
++      start: from,
++      end: to,
++      label: labels?.[index] ?? index + 1,
++      left: `clamp(0px, calc(${percent(from)}% - 1px), calc(100% - 1px))`,
++      width: `${percent(to) - percent(from)}%`,
++    }];
++  });
++}
++
++export function mountPlaybackMeasure(score) {
++  const owners = new Set([score]);
++  for (const selector of ['.rawl-period-sections', '.rawl-example']) {
++    const owner = score.closest(selector);
++    if (owner) owners.add(owner);
++  }
++  for (const owner of owners) {
++    if (!rowsByScore.has(owner)) rowsByScore.set(owner, new Set());
++    rowsByScore.get(owner).add(paint);
++  }
++
++  let beat = null, clock = null, element = null, measures = [], starts = [], current = null;
++  function paint(position, source) {
++    if (!Number.isFinite(position) && source !== clock) return;
++    beat = position;
++    clock = Number.isFinite(beat) ? source : null;
++    const next = measures[(findPlaybackMeasure(starts, beat) ?? 0) - 1];
++    const measure = next && beat < next.end ? next : null;
++    if (!element || measure === current) return;
++    current = measure;
++    element.hidden = !measure;
++    if (measure) {
++      element.dataset.measure = String(measure.label);
++      element.style.left = measure.left;
++      element.style.width = measure.width;
++    } else {
++      delete element.dataset.measure;
++    }
++  }
++
++  return {
++    update(nextElement, nextMeasures) {
++      element = nextElement;
++      measures = nextMeasures;
++      starts = measures.map(measure => measure.start);
++      paint(beat, clock);
++    },
++    destroy() {
++      paint(null, clock);
++      for (const owner of owners) {
++        const rows = rowsByScore.get(owner);
++        rows?.delete(paint);
++        if (!rows?.size) rowsByScore.delete(owner);
++      }
++    },
++  };
++}
++
++/** Advance every mounted row in this score from the host's playback clock. */
++export function setPlaybackMeasure(score, beat, clock = 'midi') {
++  for (const paint of rowsByScore.get(score) ?? []) paint(beat, clock);
++}
+diff --git a/integrations/caplin/react-notes.jsx b/integrations/caplin/react-notes.jsx
+index fb57894..97af482 100644
+--- a/integrations/caplin/react-notes.jsx
++++ b/integrations/caplin/react-notes.jsx
+@@ -2,13 +2,21 @@ import * as React from 'react';
+ import {createRoot} from 'react-dom/client';
+ import {flushSync} from 'react-dom';
+ import {getNoteRectangles} from '../../src/rawlnative/index.ts';
++import {PlaybackMeasureBorders} from '../../src/notation/PlaybackMeasureBorders.jsx';
+ import {caplinNoteModel} from './react-model.mjs';
++import {caplinPlaybackMeasures,mountPlaybackMeasure} from './playback-measure.mjs';
+
+ const noop=()=>{};
+
+ /** Rawl supplies every note rectangle; Caplin supplies authored row geometry and state. */
+-export function CaplinNoteLayer({model,axis,width}){
+- return <>{getNoteRectangles(model.notes,pitch=>axis.pitchToY(pitch)+2.5,2.5,noop,noop,noop,time=>model.toX(time,width),false,null,false,undefined,null,undefined,undefined,model.getAttributes)}</>;
++export function CaplinNoteLayer({model,axis,width,border}){
++ return <>
++  {getNoteRectangles(model.notes,pitch=>axis.pitchToY(pitch)+2.5,2.5,noop,noop,noop,time=>model.toX(time,width),false,null,false,undefined,null,undefined,undefined,model.getAttributes)}
++  <div aria-hidden="true" style={{position:'absolute',left:0,right:0,pointerEvents:'none',
++   top:'max(1px, var(--rawl-notes-top, 1px))',bottom:'max(1px, var(--rawl-notes-bottom, 1px))'}}>
++   <PlaybackMeasureBorders ref={border} hidden/>
++  </div>
++ </>;
+ }
+
+ /** A single React root per final row. Never move or clone its owned note nodes. */
+@@ -16,6 +24,7 @@ export function mount(score,options){
+  if(!score?.ownerDocument)throw new TypeError('Caplin row required');
+  const element=score.ownerDocument.createElement('div');element.className='librawl-caplin-note-layer';element.style.display='contents';score.append(element);
+  const root=createRoot(element),view=score.ownerDocument.defaultView;
++ const border=React.createRef(),playbackMeasure=mountPlaybackMeasure(score);
+  let props=options,model,destroyed=false,lastWidth=null;
+  function render(){
+   if(destroyed)return;
+@@ -23,17 +32,19 @@ export function mount(score,options){
+   const retained=new Map([...element.querySelectorAll('.rawl-note[data-note-id]')].map(node=>[node.dataset.noteId,{classes:owned.filter(name=>node.classList.contains(name)),hidden:node.hidden}]));
+   model=caplinNoteModel(props);
+   const width=score.clientWidth||score.getBoundingClientRect().width||600;lastWidth=width;
+-  flushSync(()=>root.render(<CaplinNoteLayer model={model} axis={props.axis} width={width}/>));
++  flushSync(()=>root.render(<CaplinNoteLayer model={model} axis={props.axis} width={width} border={border}/>));
++  playbackMeasure.update(border.current,caplinPlaybackMeasures(model,props.data));
+   for(const node of element.querySelectorAll('.rawl-note[data-note-id]')){
+    const prior=retained.get(node.dataset.noteId);if(prior){for(const name of owned)node.classList.toggle(name,prior.classes.includes(name));node.hidden=prior.hidden;}
+    const source=model.sourceById.get(node.dataset.noteId);if(source)props.bindNote?.(node,source);
+   }
+  }
+- try{render();}catch(error){root.unmount();element.remove();throw error;}
++ try{render();}catch(error){playbackMeasure.destroy();root.unmount();element.remove();throw error;}
+  const Observer=view?.ResizeObserver??globalThis.ResizeObserver;
+  const observer=Observer?new Observer(entries=>{const width=entries.find(entry=>entry.target===score)?.contentRect?.width;if(!destroyed&&Number.isFinite(width)&&Math.round(width)!==Math.round(lastWidth))render();}):null;
+  observer?.observe(score);
+- return {element,update(next){props={...props,...next};render();},destroy(){if(destroyed)return;destroyed=true;observer?.disconnect();root.unmount();element.remove();},get notes(){return [...element.querySelectorAll('.rawl-note')];}};
++ return {element,update(next){props={...props,...next};render();},destroy(){if(destroyed)return;destroyed=true;observer?.disconnect();playbackMeasure.destroy();root.unmount();element.remove();},get notes(){return [...element.querySelectorAll('.rawl-note')];}};
+ }
+
+ export {createShiftHoverAudition} from '../../src/shift-hover-audition.js';
++export {setPlaybackMeasure} from './playback-measure.mjs';
+diff --git a/integrations/caplin/react-notes.test.mjs b/integrations/caplin/react-notes.test.mjs
+index 9f00a12..5e4292d 100644
+--- a/integrations/caplin/react-notes.test.mjs
++++ b/integrations/caplin/react-notes.test.mjs
+@@ -48,3 +48,42 @@ test('resize retains host transpose, hover recoloring, recording state and captu
+   assert.equal(handle.notes[0],node);assert.equal(node.style.top,'50px');assert.equal(node.style.backgroundColor,'red');assert.equal(node.dataset.pitch,'62');assert.equal(node.dataset.tonic,'2');assert.equal(node.dataset.pitchClass,'0');assert.ok(node.classList.contains('recording-playing'));assert.equal(node.hidden,true);
+  }finally{handle.destroy();assert.equal(disconnected,true);dom.window.close();}
+ });
++test('legacy Caplin edges follow authored bars and the shared beat through rows, rests, and reset',()=>{
++ const {dom,score}=environment(),f=fixture(),doc=score.ownerDocument;
++ const first=doc.createElement('div'),second=doc.createElement('div');
++ const panel=doc.createElement('section');panel.className='rawl-example';
++ score.replaceWith(panel);panel.append(score);score.className='rawl-period-sections';score.append(first,second);
++ const data={...f.data,groups:[0,4],structure:{notatedBars:{starts:[0,1,3.5,7],measureLabels:[0,'1a','1b',2]}}};
++ const notes=[];
++ const a=exports.mount(first,{...f,data,notes,row:{start:0,end:4,pad:0,span:4.5}});
++ const b=exports.mount(second,{...f,data,notes,row:{start:4,end:8,pad:.5,span:4.5}});
++ try{
++  const edge=row=>row.querySelector('.rawln-playback-measure');
++  const beat=(position,owner=score)=>exports.setPlaybackMeasure(owner,position);
++  assert.equal(edge(first).hidden,true);
++  beat(.75);
++  assert.equal(edge(first).hidden,false);assert.equal(edge(first).dataset.measure,'0');
++  assert.equal(edge(second).hidden,true);
++  assert.equal(edge(first).style.borderTop,'1px solid rgb(68, 68, 68)');
++  assert.equal(edge(first).style.borderBottom,'1px solid rgb(68, 68, 68)');
++  beat(3.5,panel);
++  assert.equal(edge(first).dataset.measure,'1b');
++  assert.ok(Math.abs(parseFloat(edge(first).style.width)-100*.5/4.5)<1e-8);
++  beat(4);
++  assert.equal(edge(first).hidden,true);assert.equal(edge(second).hidden,false);
++  assert.equal(edge(second).dataset.measure,'1b');
++  assert.ok(edge(second).style.left.includes(String(100*.5/4.5).slice(0,5)));
++  assert.ok(Math.abs(parseFloat(edge(second).style.width)-100*3/4.5)<1e-8);
++  beat(7);
++  assert.equal(edge(second).dataset.measure,'2');
++  b.update({});assert.equal(edge(second).dataset.measure,'2');
++  beat(8);assert.equal(edge(second).hidden,true);
++  beat(2);assert.equal(edge(first).dataset.measure,'1a');
++  exports.setPlaybackMeasure(score,null,'recording');
++  assert.equal(edge(first).dataset.measure,'1a','late recording clear must not hide MIDI edge');
++  exports.setPlaybackMeasure(score,7.5,'recording');
++  beat(null);assert.equal(edge(second).dataset.measure,'2','MIDI cleanup must not hide the recording edge');
++  exports.setPlaybackMeasure(score,null,'recording');
++  assert.equal(edge(first).hidden,true);assert.equal(edge(second).hidden,true);
++ }finally{a.destroy();b.destroy();exports.setPlaybackMeasure(panel,2);dom.window.close();}
++});
+diff --git a/package-lock.json b/package-lock.json
+index acc2708..abdf08d 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "librawl",
+-  "version": "0.3.5",
++  "version": "0.3.5-local",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "librawl",
+-      "version": "0.3.5",
++      "version": "0.3.5-local",
+       "license": "GPL-3.0-only",
+       "devDependencies": {
+         "esbuild": "0.28.2",
+@@ -14,7 +14,8 @@
+         "react": "19.3.1",
+         "react-dom": "19.3.1",
+         "react-dom16": "npm:react-dom@16.14.0",
+-        "react16": "npm:react@16.14.0"
++        "react16": "npm:react@16.14.0",
++        "lucide-react": "0.562.0"
+       },
+       "peerDependencies": {
+         "react": ">=16.14 <20"
+@@ -1156,6 +1157,15 @@
+       "integrity": "sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==",
+       "dev": true,
+       "license": "MIT"
++    },
++    "node_modules/lucide-react": {
++      "version": "0.562.0",
++      "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.562.0.tgz",
++      "integrity": "sha512-82hOAu7y0dbVuFfmO4bYF1XEwYk/mEbM5E+b1jgci/udUBEE/R7LF5Ip0CCEmXe8AybRM8L+04eP+LGZeDvkiw==",
++      "dev": true,
++      "peerDependencies": {
++        "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0"
++      }
+     }
+   }
+ }
+diff --git a/package.json b/package.json
+index f932f07..2b37628 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "librawl",
+-  "version": "0.3.5",
++  "version": "0.3.5-local",
+   "description": "Shared Rawl React notation primitives and MIDI playback adapters",
+   "type": "module",
+   "license": "GPL-3.0-only",
+@@ -38,6 +38,15 @@
+       "require": "./dist/audio.cjs"
+     },
+     "./style.css": "./dist/style.css",
++    "./roman-numerals": {
++      "types": "./dist/roman-numerals.d.ts",
++      "import": "./dist/roman-numerals.js",
++      "require": "./dist/roman-numerals.cjs"
++    },
++    "./roman-numerals.css": "./dist/roman-numerals.css",
++    "./score-size-sliders.css": "./dist/score-size-sliders.css",
++    "./piano-legend.css": "./dist/piano-legend.css",
++    "./playback-footer.css": "./dist/playback-footer.css",
+     "./browser/*": "./dist/browser/*",
+     "./legacy-style.css": "./dist/legacy-style.css",
+     "./harmony.css": "./dist/harmony.css",
+@@ -85,11 +94,15 @@
+     "react": "19.3.1",
+     "react-dom": "19.3.1",
+     "react16": "npm:react@16.14.0",
+-    "react-dom16": "npm:react-dom@16.14.0"
++    "react-dom16": "npm:react-dom@16.14.0",
++    "lucide-react": "0.562.0"
+   },
+   "scripts": {
+     "build": "node scripts/build.mjs",
+     "test": "node --test tests/*.test.mjs integrations/caplin/*.test.mjs",
+-    "check": "npm run build && npm test"
++    "check": "npm run build && npm test",
++    "postbuild": "node scripts/sync-local-consumers.mjs --skip-build --when-enabled",
++    "sync:local": "node scripts/sync-local-consumers.mjs",
++    "watch:local": "node scripts/sync-local-consumers.mjs --watch"
+   }
+ }
+diff --git a/scripts/build.mjs b/scripts/build.mjs
+index a621c65..b67a21b 100644
+--- a/scripts/build.mjs
++++ b/scripts/build.mjs
+@@ -9,14 +9,15 @@ fs.mkdirSync(out,{recursive:true});
+ const hash=file=>createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex');
+ const digest=hash('src/audio/soundfont-playback.js');
+ const banner=`/*! librawl version: ${pkg.version}; audio source sha256: ${digest}; GPL-3.0-only */`;
+-for(const [name,entry] of Object.entries({index:'src/index.jsx',components:'src/components.jsx',geometry:'src/notation/geometry.mjs',palette:'src/notation/palette.mjs',audio:'src/audio.js',native:'src/rawlnative/index.ts','native-audio':'src/audio/native/index.ts'}))for(const [format,extension]of [['esm','js'],['cjs','cjs']])await build({entryPoints:[path.join(root,entry)],outfile:path.join(out,`${name}.${extension}`),bundle:true,format,platform:'browser',target:'es2018',jsx:'transform',external:['react','react-dom','librawl/native'],banner:{js:banner},logLevel:'error'});
+-for(const name of ['style.css','harmony.css'])fs.copyFileSync(path.join(root,'src/notation',name),path.join(out,name));
++for(const [name,entry] of Object.entries({index:'src/index.jsx',components:'src/components.jsx',geometry:'src/notation/geometry.mjs','roman-numerals':'src/notation/roman-numerals.mjs',palette:'src/notation/palette.mjs',audio:'src/audio.js',native:'src/rawlnative/index.ts','native-audio':'src/audio/native/index.ts'}))for(const [format,extension]of [['esm','js'],['cjs','cjs']])await build({entryPoints:[path.join(root,entry)],outfile:path.join(out,`${name}.${extension}`),bundle:true,format,platform:'browser',target:'es2018',jsx:'transform',external:['react','react-dom','librawl/native'],banner:{js:banner},logLevel:'error'});
++for(const name of ['style.css','harmony.css','roman-numerals.css'])fs.copyFileSync(path.join(root,'src/notation',name),path.join(out,name));
++for(const name of ['playback-footer.css','score-size-sliders.css','piano-legend.css'])fs.copyFileSync(path.join(root,'src/components',name),path.join(out,name));
+
+ fs.copyFileSync(path.join(root,'src/notation/index.d.ts'),path.join(out,'notation.d.ts'));
+-for(const name of ['index','components','audio','geometry','palette','native','native-audio'])fs.copyFileSync(path.join(root,`types/${name}.d.ts`),path.join(out,`${name}.d.ts`));
++for(const name of ['index','components','audio','geometry','palette','native','native-audio','roman-numerals','piano-legend'])fs.copyFileSync(path.join(root,`types/${name}.d.ts`),path.join(out,`${name}.d.ts`));
+ fs.copyFileSync(path.join(root,'src/rawlnative/voice-shapes.css'),path.join(out,'voice-shapes.css'));
+ fs.writeFileSync(path.join(out,'native.css'),nativeColorStyles()+fs.readFileSync(path.join(out,'voice-shapes.css'),'utf8'));
+-fs.writeFileSync(path.join(out,'legacy-style.css'),fs.readFileSync(path.join(out,'style.css'),'utf8')+fs.readFileSync(path.join(out,'native.css'),'utf8')+fs.readFileSync(path.join(out,'harmony.css'),'utf8'));
++fs.writeFileSync(path.join(out,'legacy-style.css'),['style.css','native.css','harmony.css','roman-numerals.css'].map(name=>fs.readFileSync(path.join(out,name),'utf8')).join(''));
+ await build({entryPoints:[path.join(root,'integrations/caplin/react-notes.jsx')],outfile:path.join(out,'browser/caplin-notes.js'),bundle:true,format:'iife',globalName:'LibrawlCaplinNotes',platform:'browser',target:'es2018',jsx:'transform',define:{'process.env.NODE_ENV':'"production"'},banner:{js:banner},logLevel:'error'});
+ const environment="typeof window==='undefined'?globalThis:window";
+ const base="(function(global){global.SoundFontPlayback=LibrawlAudio.createSoundFontPlayback({environment:global,importLibrary:()=>import('./vendor/spessasynth/index.js')";
+@@ -25,8 +26,8 @@ const profiles={
+  'soundfont-playback-sax':base+",allowAuditionPrograms:true,additionalBanks:[{url:'assets/soundfonts/GeneralUser-GS-alto-sax.sf2',name:'alto-sax',bytes:505140,sha256:'d7079d82a5fb6c985770578a89db8db153c20cefff38ed94270bb790bf3378e6'}]});})("+environment+");"
+ };
+ fs.mkdirSync(path.join(out,'browser'),{recursive:true});
+-await build({entryPoints:[path.join(root,'src/audio/tempo-keys.js')],outfile:path.join(out,'browser/tempo-keys.js'),bundle:true,format:'iife',globalName:'LibrawlTempoKeys',platform:'browser',target:'es2018',banner:{js:banner},logLevel:'error'});
++for(const [name,globalName] of [['tempo-keys','LibrawlTempoKeys'],['playback-keys','LibrawlPlaybackKeys']])await build({entryPoints:[path.join(root,`src/audio/${name}.js`)],outfile:path.join(out,`browser/${name}.js`),bundle:true,format:'iife',globalName,platform:'browser',target:'es2018',banner:{js:banner},logLevel:'error'});
+ fs.copyFileSync(path.join(root,'src/audio/native/midi-output-worklet.js'),path.join(out,'browser/midi-output-worklet.js'));
+ for(const [name,footer]of Object.entries(profiles))await build({entryPoints:[path.join(root,'src/audio/soundfont-playback.js')],outfile:path.join(out,'browser',`${name}.js`),bundle:true,format:'iife',globalName:'LibrawlAudio',platform:'browser',target:'es2018',banner:{js:banner},footer:{js:footer},logLevel:'error'});
+-fs.writeFileSync(path.join(out,'provenance.json'),JSON.stringify({version:pkg.version,audioSourceSha256:digest,audioSources:Object.fromEntries(['src/audio/soundfont-playback.js','src/audio/continuous-playback.js','src/audio/transport.js'].map(file=>[file,hash(file)])),files:Object.fromEntries(fs.readdirSync(out).filter(n=>n!=='provenance.json'&&fs.statSync(path.join(out,n)).isFile()).map(n=>[n,createHash('sha256').update(fs.readFileSync(path.join(out,n))).digest('hex')]))},null,2)+'\n');
++fs.writeFileSync(path.join(out,'provenance.json'),JSON.stringify({version:pkg.version,audioSourceSha256:digest,audioSources:Object.fromEntries(['src/audio/soundfont-playback.js','src/audio/continuous-playback.js','src/audio/transport.js','src/audio/playback-keys.js'].map(file=>[file,hash(file)])),files:Object.fromEntries(fs.readdirSync(out).filter(n=>n!=='provenance.json'&&fs.statSync(path.join(out,n)).isFile()).map(n=>[n,createHash('sha256').update(fs.readFileSync(path.join(out,n))).digest('hex')]))},null,2)+'\n');
+ console.log(JSON.stringify({version:pkg.version,audioSourceSha256:digest,status:'built'}));
+diff --git a/src/audio.js b/src/audio.js
+index a0c2278..1b62949 100644
+--- a/src/audio.js
++++ b/src/audio.js
+@@ -1,3 +1,4 @@
+ export {createSoundFontPlayback} from './audio/soundfont-playback.js';
+ export {createTransport} from './audio/transport.js';
+ export {bindTempoKeys} from './audio/tempo-keys.js';
++export {bindPlaybackKeys} from './audio/playback-keys.js';
+diff --git a/src/audio/playback-keys.js b/src/audio/playback-keys.js
+new file mode 100644
+index 0000000..e9eebcf
+--- /dev/null
++++ b/src/audio/playback-keys.js
+@@ -0,0 +1,68 @@
++const targets = new WeakMap();
++const textControls = 'input, textarea, [contenteditable]:not([contenteditable="false"]), [role~="textbox"]';
++const readerControls = [
++  textControls, 'select', 'button', 'summary', 'dialog[open]',
++  ...['button', 'checkbox', 'combobox', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
++    'option', 'radio', 'slider', 'switch', 'tab'].map(role => `[role~="${role}"]`),
++  'audio[controls]', 'video[controls]',
++].join(',');
++
++/** A persistent app supplies toggle. Example players supply pause and declare when active. */
++export function bindPlaybackKeys({
++  target = globalThis.document, pause, toggle, enabled = () => true,
++  allowInInputs = false, preventScrollWhenIdle = false,
++}) {
++  let registry = targets.get(target);
++  if (!registry) {
++    const bindings = new Set();
++    const active = new Set();
++    let consumed = false;
++    const keydown = event => {
++      if (event.code !== 'Space' && event.key !== ' ' && event.key !== 'Spacebar') return;
++      if (!event.repeat) consumed = false;
++      if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey ||
++          event.altKey || event.shiftKey) return;
++      let app;
++      let idleBlocker = false;
++      for (const binding of bindings) {
++        if ((binding.toggle || binding.preventScrollWhenIdle) && binding.enabled()) {
++          if (binding.toggle) app = binding;
++          if (binding.preventScrollWhenIdle) idleBlocker = true;
++        }
++      }
++      let player = app;
++      if (!player) {
++        for (const binding of active) if (binding.enabled()) player = binding;
++      }
++      if (!player && !idleBlocker && !consumed) return;
++      const element = event.composedPath?.()[0] ?? event.target;
++      if (app ? !app.allowInInputs && element?.closest?.(textControls)
++              : element?.closest?.(readerControls) || target.querySelector?.('dialog[open]')) return;
++      event.preventDefault();
++      if (app) event.stopPropagation();
++      consumed = true;
++      if (!event.repeat) (player?.toggle ?? player?.pause)?.();
++    };
++    registry = {bindings, active, keydown};
++    target.addEventListener('keydown', keydown, true);
++    targets.set(target, registry);
++  }
++
++  const player = {pause, toggle, enabled, allowInInputs, preventScrollWhenIdle};
++  registry.bindings.add(player);
++  return {
++    setActive(active) {
++      if (!registry.bindings.has(player)) return;
++      registry.active.delete(player);
++      if (active) registry.active.add(player);
++    },
++    destroy() {
++      if (!registry.bindings.delete(player)) return;
++      registry.active.delete(player);
++      if (!registry.bindings.size) {
++        target.removeEventListener('keydown', registry.keydown, true);
++        targets.delete(target);
++      }
++    },
++  };
++}
+diff --git a/src/audio/transport.js b/src/audio/transport.js
+index 44f6fd0..8e43127 100644
+--- a/src/audio/transport.js
++++ b/src/audio/transport.js
+@@ -1,9 +1,12 @@
++import {bindPlaybackKeys} from './playback-keys.js';
++
+ /** Host transport; renderer package remains independent of this audio engine. */
+-export function createTransport({makePlan,audio:providedAudio,onState=()=>{},onPosition=()=>{},onError=()=>{}}={}){
++export function createTransport({makePlan,audio:providedAudio,onState=()=>{},onPosition=()=>{},onError=()=>{},keyboardTarget=globalThis.document}={}){
+  if(typeof makePlan!=='function')throw new TypeError('makePlan is required');
+  const audioEngine=()=>providedAudio??globalThis.SoundFontPlayback;
+  let data=null,engine=null,context=null,clock=null,position=0,tempo=120,planTempo=120,state='idle',token=0,frame=null,nodes=[],mixers=[],output=null,muted=new Set(),auditionVoice=null,auditionGeneration=0;
+- const emit=s=>{state=s;onState(s);};
++ const keys=keyboardTarget&&bindPlaybackKeys({target:keyboardTarget,pause});
++ const emit=s=>{state=s;keys?.setActive(s==='playing'||s==='loading');onState(s);};
+  function disconnect(){for(const n of nodes)try{n.disconnect();}catch{}nodes=[];mixers=[];output=null;}
+  function cancel(){token++;cancelAnimationFrame(frame);frame=null;clock=null;auditionGeneration++;auditionVoice=null;audioEngine()?.stop();disconnect();}
+  // Caplin's clock separates a transport position from an audible beat. The
+@@ -32,7 +35,7 @@ export function createTransport({makePlan,audio:providedAudio,onState=()=>{},onP
+   setTempo(value){const next=Math.max(40,Math.min(260,Number(value)||120));if(clock)position=clock.position();tempo=next;if(state==='playing')engine.setRate(next/planTempo);},
+   setMuted(voice,value){if(value)muted.add(voice);else muted.delete(voice);if(mixers[voice])mixers[voice].gain.setTargetAtTime(value?0:1,context.currentTime,.008);if(value&&auditionVoice===voice){auditionGeneration++;engine?.stopAudition?.();auditionVoice=null;}},
+   async audition(note){const run=token,voice=note.voice??0;if(muted.has(voice))return;try{const audio=audioEngine();context??=audio.getContext()??new (globalThis.AudioContext||globalThis.webkitAudioContext)();await context.resume();engine=await audio.prepare(context);if(run!==token||muted.has(voice))return;const supplied=data?.voices?.find(v=>v.voice===voice)?.program,program=Number.isInteger(supplied)&&supplied>=0&&supplied<=127?supplied:(voice===1?65:0);const audition=++auditionGeneration;auditionVoice=voice;engine.audition({pitch:note.pitch,duration:Math.min(2,note.duration*60/tempo),velocity:note.velocity??(voice===1?80:74),program},()=>{if(audition===auditionGeneration)auditionVoice=null;});}catch(error){if(run===token&&error.name!=='AbortError')onError(error);}},
+-  destroy(){stop();data=null;},
++  destroy(){keys?.destroy();stop();data=null;},
+   get state(){return state;},get position(){return position;},get tempo(){return tempo;},get data(){return data;},get mutedVoices(){return [...muted];}
+  };
+ }
+diff --git a/src/components.jsx b/src/components.jsx
+index c3557a6..588442e 100644
+--- a/src/components.jsx
++++ b/src/components.jsx
+@@ -1,2 +1,9 @@
+ export {TonicSymbol} from './components/TonicSymbol.jsx';
+-export {RawlMeasureHeader} from './notation/RawlNotation.jsx';
++export {RawlMeasureHeader,PlaybackMeasureBorders,PlaybackMeasureLayer} from './notation/RawlNotation.jsx';
++export {PlaybackFooter} from './components/PlaybackFooter.jsx';
++export {observePlaybackPosition} from './components/playback-position.js';
++
++export {RomanNumeral} from './components/RomanNumeral.jsx';
++export {ScoreSizeSliders} from './components/ScoreSizeSliders.jsx';
++export {PianoLegend,InlinePianoLegend,FoldablePianoLegend} from './components/PianoLegend.jsx';
++export {ScorePinchContent,useScorePinch} from './components/score-pinch.ts';
+diff --git a/src/components/PianoLegend.jsx b/src/components/PianoLegend.jsx
+new file mode 100644
+index 0000000..7362f91
+--- /dev/null
++++ b/src/components/PianoLegend.jsx
+@@ -0,0 +1,322 @@
++// Keyboard, chord modes and scale patterns from Rawl's PianoLegend and ChordStairs (GPL-3.0-only).
++import React, { useEffect, useRef, useState } from 'react';
++import { ChevronDown, ChevronUp, GraduationCap, Guitar } from 'lucide-react';
++import { TONIC_NAMES } from '../notation/geometry.mjs';
++import { RAWL_COLORS, colorIndex } from '../notation/palette.mjs';
++
++const WHITE_KEYS = [0, 2, 4, 5, 7, 9, 11];
++const BLACK_KEYS = [1, 3, null, 6, 8, 10, null];
++const BLACK_LABELS = ['♭2', '♭3', null, '♯4', '♭6', '♭7'];
++const ALL_PITCHES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
++const MOBILE = '(max-width: 767px)';
++const ARPEGGIO_DELAY_MS = 60;
++const CHORDS = {
++  ii: [2, 5, 9], IV: [5, 9, 0], vi: [9, 0, 4], I: [0, 4, 7],
++  iii: [4, 7, 11], V: [7, 11, 2], V7: [7, 11, 2, 5],
++  iio: [2, 5, 8], iv: [5, 8, 0], bVI: [8, 0, 3], i: [0, 3, 7],
++  bIII: [3, 7, 10], v: [7, 10, 2], bVII: [10, 2, 5],
++};
++const MODES = [
++  { title: 'major', names: ['ii', 'IV', 'vi', 'I', 'iii', 'V', 'V7'] },
++  { title: 'minor', names: ['iio', 'iv', 'bVI', 'i', 'bIII', 'V', 'V7', 'v', 'bVII'] },
++].map(({ title, names }) => ({ title, chords: names.map(name => ({ name, pitches: CHORDS[name] })) }));
++const SCALES = [
++  { label: 'minor', color: 3, scales: [
++    ['phrygian', [0, 1, 3, 5, 7, 8, 10]], ['natural', [0, 2, 3, 5, 7, 8, 10]],
++    ['harmonic', [0, 2, 3, 5, 7, 8, 11]], ['dorian', [0, 2, 3, 5, 7, 9, 10]],
++  ] },
++  { label: 'major', color: 4, scales: [
++    ['mixolydian', [0, 2, 4, 5, 7, 9, 10]], ['natural', WHITE_KEYS],
++    ['lydian', [0, 2, 4, 6, 7, 9, 11]], ['hijaz', [0, 1, 4, 5, 7, 8, 10]],
++  ] },
++];
++
++const color = degree => RAWL_COLORS[colorIndex(degree)].background;
++
++function PitchDot({ pitch }) {
++  const { dot } = RAWL_COLORS[colorIndex(pitch)];
++  if (!dot) return null;
++  return <span className="rawln-piano-pitch-dot" aria-hidden="true"
++    style={{ width: dot.size, height: dot.size, background: dot.color }} />;
++}
++
++const tonicName = degree => TONIC_NAMES[colorIndex(degree)];
++const romanName = name => name.replace('b', '♭');
++const chordQualities = { '4 3': '', '3 4': 'm', '3 3': 'dim', '3 4 3': 'm7', '4 3 3': '7', '4 3 4': 'maj7', '3 3 4': 'ø7' };
++// Same degree spelling as Rawl's guitar-chord view, including minor-key enharmonics.
++const minorTonics = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'B♭', 'B'];
++function guitarName(name, pitches, tonic, minor) {
++  const intervals = pitches.slice(1).map((pitch, i) => colorIndex(pitch - pitches[i])).join(' ');
++  const quality = chordQualities[intervals];
++  if (quality === undefined) return;
++  const root = tonic + pitches[0];
++  let expected = tonic;
++  let letter = 'CDEFGAB'.indexOf((minor ? minorTonics : TONIC_NAMES)[colorIndex(tonic)][0]);
++  for (const part of name.split('/').reverse()) {
++    const match = /^([b#]*)([ivIV]+)/.exec(part);
++    const degree = match ? ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'].indexOf(match[2].toUpperCase()) : -1;
++    if (degree < 0) return tonicName(root) + quality;
++    letter = (letter + degree) % 7;
++    expected += WHITE_KEYS[degree];
++    for (const accidental of match[1]) expected += accidental === 'b' ? -1 : 1;
++  }
++  if (colorIndex(expected) !== colorIndex(root)) return tonicName(root) + quality;
++  const accidental = colorIndex(root - WHITE_KEYS[letter] + 6) - 6;
++  return 'CDEFGAB'[letter] + (accidental < 0 ? '♭'.repeat(-accidental) : '♯'.repeat(accidental)) + quality;
++}
++
++export function PianoLegend({
++  currentTonic = 0, inline = false, enabledPitches = ALL_PITCHES, activePitch = null, onAudition,
++}) {
++  const [playing, setPlaying] = useState(null);
++  const timer = useRef(null);
++  const stop = useRef(null);
++  useEffect(() => () => {
++    clearTimeout(timer.current);
++    stop.current?.();
++  }, []);
++  function renderKey(pitch, label, left, raised) {
++    const enabled = enabledPitches.includes(pitch);
++    const active = activePitch === pitch;
++    const interactive = !inline && enabled && !!onAudition;
++    const Element = interactive ? 'button' : 'span';
++    return <Element key={pitch}
++      {...(interactive ? { type: 'button', 'aria-label': tonicName(pitch + currentTonic), onClick: () => {
++        clearTimeout(timer.current);
++        stop.current?.();
++        setPlaying(pitch);
++        stop.current = onAudition([pitch + currentTonic], { kind: 'note' });
++        timer.current = setTimeout(() => setPlaying(null), 200);
++      } } : { 'aria-hidden': true })}
++      className="rawln-piano-key" data-raised={raised || undefined} data-active={active || undefined}
++      data-hidden={!enabled && !active || undefined} data-playing={playing === pitch || undefined}
++      style={{ left: `${left * 100 / 7}%`, background: color(pitch) }}>
++      <PitchDot pitch={pitch} />
++      {!inline && <>{pitch === 0 && <span className="rawln-piano-tonic">{tonicName(currentTonic)}</span>}{label}</>}
++    </Element>;
++  }
++  return <div className={`rawln-piano-keys${inline ? ' rawln-piano-inline' : ''}`}>
++    {WHITE_KEYS.map((pitch, i) => renderKey(pitch, i + 1, i, false))}
++    {BLACK_KEYS.map((pitch, i) => pitch === null ? null : renderKey(pitch, BLACK_LABELS[i], i + 0.5, true))}
++  </div>;
++}
++
++export function InlinePianoLegend(props) {
++  return <PianoLegend {...props} inline />;
++}
++
++function ChordRow({ mode, tonic, guitar, onAudition, setHoveredColors }) {
++  const [playing, setPlaying] = useState(null);
++  const timer = useRef(null);
++  useEffect(() => () => clearTimeout(timer.current), []);
++  const voiced = [];
++  for (const chord of mode.chords) {
++    if (!chord.pitches.length) continue;
++    if (chord.positions?.length === chord.pitches.length) {
++      voiced.push(chord);
++      continue;
++    }
++    const previous = voiced[voiced.length - 1]?.positions[0];
++    const root = chord.pitches[0];
++    const distance = previous == null ? 0 : colorIndex(root - previous);
++    const bass = previous == null ? root : previous + (distance > 6 ? distance - 12 : distance);
++    const positions = [bass];
++    for (let i = 1; i < chord.pitches.length; i++) {
++      positions.push(positions[i - 1] + colorIndex(chord.pitches[i] - chord.pitches[i - 1]));
++    }
++    voiced.push({ ...chord, positions });
++  }
++  if (!voiced.length) return null;
++  const top = Math.max(...voiced.flatMap(chord => chord.positions));
++  const bottom = Math.min(...voiced.flatMap(chord => chord.positions));
++  const tonicIndex = voiced.findIndex(({ name }) => name === 'I' || name === 'i');
++  const minor = mode.title.toLowerCase().includes('minor') || voiced.some(({ name }) => name === 'i');
++  return <div className="rawln-piano-mode">
++    <div className="rawln-piano-chords" style={{ '--rawln-piano-chord-count': voiced.length, height: (top - bottom) * 3 + 52 }}>
++      {voiced.map(({ name, pitches, positions, romanLabel }, i) => {
++        const showAbove = i < tonicIndex;
++        const alternateLabel = guitar ? guitarName(name, pitches, tonic, minor) : undefined;
++        const label = alternateLabel ?? romanName(name);
++        const labelTop = 22 + (top - positions[showAbove ? positions.length - 1 : 0]) * 3 + (showAbove ? -20 : 9);
++        const Element = onAudition ? 'button' : 'span';
++        const clearHover = () => setHoveredColors?.(null);
++        const preview = () => setHoveredColors?.(pitches.map(pitch => `noteColor_${colorIndex(pitch)}_colors`));
++        return <Element key={`${name}-${i}`} className="rawln-piano-chord"
++          {...(onAudition ? { type: 'button', 'aria-label': label, onClick: () => {
++            clearTimeout(timer.current);
++            setPlaying({ index: i, serial: Date.now() });
++            onAudition(positions.map(pitch => pitch + tonic), { kind: 'chord' });
++            timer.current = setTimeout(() => setPlaying(null), 600);
++          } } : {})}
++          onMouseEnter={preview} onMouseLeave={clearHover} onFocus={preview} onBlur={clearHover}>
++          {positions.map((position, j) => <i key={`${j}-${playing?.index === i ? playing.serial : ''}`} aria-hidden="true"
++            data-playing={playing?.index === i || undefined}
++            style={{ top: 22 + (top - position) * 3, background: color(pitches[j]), animationDelay: `${ARPEGGIO_DELAY_MS * j}ms` }}>
++            <PitchDot pitch={pitches[j]} />
++          </i>)}
++          <span style={{ top: labelTop }}>{alternateLabel ?? romanLabel ?? label}</span>
++        </Element>;
++      })}
++    </div>
++    {mode.title && <div className="rawln-piano-mode-title">{mode.title}</div>}
++  </div>;
++}
++
++function getMobile() {
++  return typeof window !== 'undefined' && window.matchMedia?.(MOBILE).matches === true;
++}
++
++function storedExpansion(key, mobile) {
++  try {
++    const value = globalThis.localStorage?.getItem(mobile ? `${key}Mobile` : key);
++    if (value === 'true' || value === 'false') return value === 'true';
++  } catch {
++    // Storage may be unavailable inside a private or embedded browser context.
++  }
++  return false;
++}
++
++function reserveCollapsedLegendSpace(legend) {
++  const { ownerDocument: document } = legend;
++  const window = document.defaultView;
++  let scroller = legend.parentElement;
++  while (scroller && scroller !== document.body &&
++    !/^(auto|scroll|overlay)$/.test(window.getComputedStyle(scroller).overflowY)) {
++    scroller = scroller.parentElement;
++  }
++  const target = scroller ?? document.body;
++  const spacer = document.createElement('div');
++  spacer.className = 'rawln-piano-clearance';
++  spacer.setAttribute('aria-hidden', 'true');
++  const main = legend.closest('main');
++  const placement = main && target.contains(main) ? main : target;
++  placement.append(spacer);
++
++  const update = () => {
++    const scrollBottom = target === document.body
++      ? window.innerHeight
++      : Math.min(window.innerHeight, target.getBoundingClientRect().top + target.clientTop + target.clientHeight);
++    const needed = legend.getClientRects().length
++      ? Math.max(0, scrollBottom - legend.getBoundingClientRect().top + 4)
++      : 0;
++    spacer.style.setProperty('--rawln-piano-needed-clearance', `${needed}px`);
++    spacer.style.setProperty('--rawln-piano-existing-clearance',
++      window.getComputedStyle(legend).getPropertyValue('--rawln-piano-existing-clearance') || '0px');
++  };
++  const observer = window.ResizeObserver ? new window.ResizeObserver(update) : null;
++  observer?.observe(legend);
++  if (target !== document.body) observer?.observe(target);
++  window.addEventListener('resize', update);
++  update();
++  return () => {
++    observer?.disconnect();
++    window.removeEventListener('resize', update);
++    spacer.remove();
++  };
++}
++
++export function FoldablePianoLegend({
++  currentTonic = 0, modes = MODES, onAudition, setHoveredColors, storageKey = 'showLegend',
++}) {
++  const [mobile, setMobile] = useState(getMobile);
++  const [expanded, setExpanded] = useState(() => storedExpansion(storageKey, mobile));
++  const [scale, setScale] = useState(null);
++  const [highlight, setHighlight] = useState(null);
++  const [guitar, setGuitar] = useState(false);
++  const audition = useRef(null);
++  const legend = useRef(null);
++
++  useEffect(() => {
++    if (!expanded && legend.current) return reserveCollapsedLegendSpace(legend.current);
++  }, [expanded]);
++
++  function stop() {
++    const run = audition.current;
++    audition.current = null;
++    run?.cancel?.();
++  }
++
++  useEffect(() => {
++    const media = window.matchMedia?.(MOBILE);
++    const changed = event => setMobile(event.matches);
++    media?.addEventListener?.('change', changed);
++    return () => media?.removeEventListener?.('change', changed);
++  }, []);
++  useEffect(() => setExpanded(storedExpansion(storageKey, mobile)), [storageKey, mobile]);
++  useEffect(() => {
++    setHighlight(null);
++    setScale(null);
++    return stop;
++  }, [currentTonic, expanded]);
++
++  function toggle() {
++    const next = !expanded;
++    setExpanded(next);
++    if (!next) setHoveredColors?.(null);
++    try {
++      globalThis.localStorage?.setItem(mobile ? `${storageKey}Mobile` : storageKey, JSON.stringify(next));
++    } catch {
++      // The fold still works when storage is disabled.
++    }
++  }
++
++  function play(pitches, { kind, onActiveNote }) {
++    stop();
++    setHighlight(null);
++    const run = {};
++    audition.current = run;
++    run.cancel = onAudition(pitches, { kind, onActiveNote: index => {
++      if (audition.current === run) onActiveNote?.(index);
++    } });
++  }
++
++  function playScale(pitches) {
++    const sequence = [...pitches, 12];
++    play(sequence.map(pitch => pitch + currentTonic), {
++      kind: 'scale', onActiveNote: index => setHighlight(index == null ? null : sequence[index]),
++    });
++  }
++
++  const Chevron = expanded ? ChevronDown : ChevronUp;
++  const chordNamesLabel = guitar ? 'Show Roman numerals' : 'Show guitar chords';
++  return <aside ref={legend} className="rawln-piano-legend" data-expanded={expanded}>
++    <div className="rawln-piano-header">
++      <button type="button" className="rawln-piano-fold" onClick={toggle} aria-label="Piano legend"
++        aria-expanded={expanded}>
++        <Chevron size={14} aria-hidden="true" />
++        {!expanded && <InlinePianoLegend />}
++      </button>
++      {expanded && <button type="button" className="rawln-piano-names" aria-pressed={guitar}
++        aria-label={chordNamesLabel} title={chordNamesLabel} onClick={() => setGuitar(!guitar)}>
++        <GraduationCap size={14} className="rawln-piano-name-roman" aria-hidden="true" />
++        <span className="rawln-piano-name-track" aria-hidden="true" />
++        <Guitar size={14} className="rawln-piano-name-guitar" aria-hidden="true" />
++      </button>}
++    </div>
++    <div className="rawln-piano-panel" hidden={!expanded}>
++      {expanded && <>
++        {modes.map((mode, i) => <ChordRow key={i} mode={mode} tonic={currentTonic} guitar={guitar}
++          onAudition={onAudition ? play : undefined} setHoveredColors={setHoveredColors} />)}
++        <div className="rawln-piano-octaves">
++          {[0, 12].map(octave => <PianoLegend key={octave} currentTonic={currentTonic + octave}
++            enabledPitches={scale ?? ALL_PITCHES} activePitch={highlight == null ? null : highlight - octave}
++            onAudition={onAudition ? play : undefined} />)}
++        </div>
++        {SCALES.map(group => <div key={group.label} className="rawln-piano-scale-row">
++          <span style={{ background: color(group.color), color: RAWL_COLORS[group.color].foreground }}>{group.label}</span>
++          {group.scales.map(([label, pitches]) => {
++            const Element = onAudition ? 'button' : 'span';
++            return <Element key={label} className="rawln-piano-scale" style={{
++              background: `linear-gradient(to right, ${[1, 2, 3, 5, 6].map((degree, i) => `${color(pitches[degree])} ${i * 20}% ${(i + 1) * 20}%`).join(', ')})`,
++            }} {...(onAudition ? { type: 'button', 'aria-label': `Play ${label} ${group.label} scale`,
++              onClick: () => playScale(pitches) } : {})}
++              onMouseEnter={() => setScale(pitches)} onMouseLeave={() => setScale(null)}
++              onFocus={() => setScale(pitches)} onBlur={() => setScale(null)}>
++              {label}
++            </Element>;
++          })}
++        </div>)}
++      </>}
++    </div>
++  </aside>;
++}
+diff --git a/src/components/PlaybackFooter.jsx b/src/components/PlaybackFooter.jsx
+new file mode 100644
+index 0000000..e1976df
+--- /dev/null
++++ b/src/components/PlaybackFooter.jsx
+@@ -0,0 +1,175 @@
++// Playback controls and timeline adapted from Rawl AppFooter, TimeSlider, and Slider.
++// Rawl c87e915b073d9953f6d9eefa7f376e5d2bd0b8a2, GPL-3.0-only.
++import React, {memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef} from 'react';
++import {bindTempoKeys} from '../audio/tempo-keys.js';
++import {bindPlaybackKeys} from '../audio/playback-keys.js';
++import {observePlaybackPosition} from './playback-position.js';
++
++const EMPTY_TIMELINE = {};
++const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
++
++function formatTime(value) {
++  const seconds = Math.floor(Math.max(0, value));
++  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
++}
++
++function timelineGeometry(timeline, duration) {
++  const percent = time => time / duration * 100;
++  const marks = (times, inclusive = false) => (times ?? []).filter(
++    time => Number.isFinite(time) && time >= 0 && (inclusive ? time <= duration : time < duration),
++  ).map(percent);
++  const bass = (timeline.bassBars ?? []).flatMap(({start, end, color}) => {
++    const left = percent(Math.max(0, start));
++    const right = percent(Math.min(duration, end));
++    return Number.isFinite(left) && Number.isFinite(right) && right > left ? [{left, right, color}] : [];
++  });
++  const colored = (timeline.coloredMarks ?? []).filter(({time}) =>
++    Number.isFinite(time) && time >= 0 && time <= duration,
++  ).map(({time, color}) => ({left: percent(time), color}));
++  return {sections: marks([...(timeline.sections ?? []), duration], true),
++    phrases: marks(timeline.phrases), bass, colored};
++}
++
++// The playhead and time labels can update without redrawing the musical marks.
++const TimelineMarks = memo(function TimelineMarks({geometry}) {
++  if (!geometry) return null;
++  const {sections, phrases, bass, colored} = geometry;
++  return (
++    <div className="rawlp-marks" aria-hidden="true">
++      {sections.map((left, index) => (
++        <i className="rawlp-section-mark" key={index} style={{left: `${left}%`}} />
++      ))}
++      {phrases.map((left, index) => (
++        <i className="rawlp-phrase-mark" key={index} style={{left: `${left}%`}} />
++      ))}
++      {bass.map(({left, right, color}, index) => (
++        <i className="rawlp-bass-bar" key={index} style={{left: `${left}%`, width: `${right - left}%`, background: color}} />
++      ))}
++      {colored.map(({left, color}, index) => (
++        <i className="rawlp-colored-mark" key={index} style={{left: `${left}%`, background: color}} />
++      ))}
++    </div>
++  );
++});
++
++export function PlaybackFooter({
++  position, duration, playing, getPosition, onTogglePlay, onSeek, rate, onRateChange,
++  volume, onVolumeChange, volumeMax = 1, timeline = EMPTY_TIMELINE, keyboardShortcuts = true,
++  allowSpaceInInputs = false, disabled = false, beforeTimeline, children,
++}) {
++  const length = Number.isFinite(duration) && duration > 0 ? duration : 0;
++  const hasTempo = Number.isFinite(rate) && !!onRateChange;
++  const hasVolume = Number.isFinite(volume) && !!onVolumeChange;
++  const seekRef = useRef(null);
++  const elapsedRef = useRef(null);
++  const activePointer = useRef(null);
++  const elapsed = clamp(Number.isFinite(position) ? position : 0, 0, length);
++  const geometry = useMemo(() => length ? timelineGeometry(timeline, length) : null, [timeline, length]);
++
++  const paintPosition = useCallback(next => {
++    const input = seekRef.current;
++    const label = elapsedRef.current;
++    const seconds = clamp(Number.isFinite(next) ? next : 0, 0, length);
++    if (input.valueAsNumber !== seconds) input.value = String(seconds);
++    const time = formatTime(seconds);
++    if (label.textContent !== time) label.textContent = time;
++    if (input.getAttribute('aria-valuetext') !== time) input.setAttribute('aria-valuetext', time);
++  }, [length]);
++
++  // The range and clock label can move without scheduling a React render.
++  useLayoutEffect(() => {
++    if (activePointer.current !== null) paintPosition(seekRef.current.valueAsNumber);
++    if (playing && getPosition && length && !disabled) {
++      return observePlaybackPosition(getPosition, next => {
++        if (activePointer.current === null) paintPosition(next);
++      });
++    }
++    if (activePointer.current === null) paintPosition(elapsed);
++  }, [playing, getPosition, length, disabled, elapsed, paintPosition]);
++
++  function beginScrub(event) {
++    if (activePointer.current !== null || event.button !== 0) return;
++    activePointer.current = event.pointerId;
++    event.currentTarget.setPointerCapture?.(event.pointerId);
++  }
++
++  function finishScrub(event, commit) {
++    if (activePointer.current !== event.pointerId) return;
++    activePointer.current = null;
++    if (commit && !disabled && length) onSeek(Number(event.currentTarget.value));
++    else paintPosition(playing && getPosition ? getPosition() : elapsed);
++  }
++
++  useEffect(() => {
++    if (!keyboardShortcuts || disabled) return;
++    const keys = bindPlaybackKeys({toggle: onTogglePlay, allowInInputs: allowSpaceInInputs});
++    return () => keys.destroy();
++  }, [keyboardShortcuts, disabled, onTogglePlay, allowSpaceInInputs]);
++
++  useEffect(() => {
++    if (!keyboardShortcuts || disabled || !hasTempo) return;
++    return bindTempoKeys({
++      adjustTempo: delta => onRateChange(clamp(Number((rate + delta).toFixed(2)), 0.1, 4)),
++    });
++  }, [keyboardShortcuts, disabled, hasTempo, onRateChange, rate]);
++
++  return (
++    <footer className="rawlp-footer" aria-label="Playback">
++      <div className="rawlp-playback">
++        <button type="button" className="rawlp-play" disabled={disabled}
++          aria-label={playing ? 'Pause' : 'Play'} onClick={onTogglePlay}>
++          <svg aria-hidden="true" width="14" height="16" viewBox="0 0 14 16" fill="currentColor">
++            {playing ? <path d="M2 1h4v14H2zm6 0h4v14H8z" /> : <path d="M2 1l12 7L2 15z" />}
++          </svg>
++        </button>
++        {beforeTimeline}
++      </div>
++      <div className="rawlp-timeline">
++        <span className="rawlp-time" ref={elapsedRef}>{formatTime(elapsed)}</span>
++        <div className="rawlp-track">
++          <TimelineMarks geometry={geometry} />
++          <input ref={seekRef} aria-label="Seek" aria-valuetext={formatTime(elapsed)}
++            type="range" min={0} max={length || 1} step="any" defaultValue={elapsed}
++            disabled={disabled || !length} onPointerDown={beginScrub}
++            onPointerUp={event => finishScrub(event, true)}
++            onPointerCancel={event => finishScrub(event, false)}
++            onLostPointerCapture={event => finishScrub(event, false)}
++            onChange={event => {
++              const next = Number(event.currentTarget.value);
++              if (activePointer.current === null) onSeek(next);
++              else paintPosition(next);
++            }}
++          />
++        </div>
++        <span className="rawlp-time">{formatTime(length)}</span>
++      </div>
++      {(hasTempo || hasVolume || children) && (
++        <div className="rawlp-options">
++          {hasTempo && (
++            <div className="rawlp-tempo">
++              <button type="button" aria-label="Slow down" disabled={disabled || rate <= 0.1}
++                onClick={() => onRateChange(clamp(Number((rate - 0.1).toFixed(2)), 0.1, 4))}>
++                <span aria-hidden="true"><i>_</i><i>−</i></span>
++              </button>
++              <span>{Number(rate.toFixed(2))}x</span>
++              <button type="button" aria-label="Speed up" disabled={disabled || rate >= 4}
++                onClick={() => onRateChange(clamp(Number((rate + 0.1).toFixed(2)), 0.1, 4))}>
++                <span aria-hidden="true"><i>+</i><i>=</i></span>
++              </button>
++            </div>
++          )}
++          {hasVolume && (
++            <label className="rawlp-volume">
++              Vol
++              <input aria-label="Volume" type="range" min={0} max={Math.round(volumeMax * 100)} step={1}
++                value={Math.round(volume * 100)} disabled={disabled}
++                onChange={event => onVolumeChange(Number(event.currentTarget.value) / 100)}
++                onDoubleClick={() => onVolumeChange(1)} />
++            </label>
++          )}
++          {children}
++        </div>
++      )}
++    </footer>
++  );
++}
+diff --git a/src/components/RomanNumeral.jsx b/src/components/RomanNumeral.jsx
+new file mode 100644
+index 0000000..a8c4d1b
+--- /dev/null
++++ b/src/components/RomanNumeral.jsx
+@@ -0,0 +1,17 @@
++import React, {useEffect, useMemo, useRef} from 'react';
++import {romanNumeralContent} from '../notation/roman-numerals.mjs';
++import {romanNumeralTooltipHTML, romanNumeralTooltipModel} from '../notation/roman-numeral-tooltip.mjs';
++import {bindRomanNumeralTooltip} from '../notation/bind-roman-numeral-tooltip.mjs';
++
++export function RomanNumeral({notation, options, tooltip = false}) {
++  const ref = useRef(null);
++  const model = useMemo(() => romanNumeralTooltipModel(notation, options, tooltip), [notation, options, tooltip]);
++  useEffect(() => {
++    if (!model) return;
++    return bindRomanNumeralTooltip(ref.current, () => romanNumeralTooltipHTML(notation, options ?? {}, model));
++  }, [notation, options, model]);
++  return <span ref={ref} className="rawln-roman" data-roman-theme={options?.theme==='light'?'light':'dark'}
++    data-roman-font={options?.font === 'sans-serif' ? 'sans-serif' : undefined}
++    data-rn-tooltip={model ? '' : undefined} tabIndex={model ? 0 : undefined}
++    dangerouslySetInnerHTML={{__html:romanNumeralContent(notation,options)}} />;
++}
+diff --git a/src/components/ScoreSizeSliders.jsx b/src/components/ScoreSizeSliders.jsx
+new file mode 100644
+index 0000000..574f39e
+--- /dev/null
++++ b/src/components/ScoreSizeSliders.jsx
+@@ -0,0 +1,57 @@
++// Bounds and A/D, W/S controls from Rawl layouts/ControlPanel.tsx (GPL-3.0-only).
++import React, {useEffect, useRef, useState} from 'react';
++
++const HEIGHT = {min:1,max:10};
++const SPACING = {min:2,max:150};
++const clamp = (value,{min,max}) => Math.min(max,Math.max(min,value));
++
++function SizeRange({label, title = label, value, bounds, onChange, before, after, vertical = false}) {
++  const [draft,setDraft] = useState(null);
++  const timer = useRef(null);
++  useEffect(() => () => clearTimeout(timer.current), []);
++  const displayValue = draft ?? value;
++
++  return (
++    <label className={vertical ? 'rawln-size-option rawln-size-option-height' : 'rawln-size-option'}>
++        <span className="rawln-size-key" aria-hidden="true">{before}</span>
++        <input type="range" aria-label={label} title={title} aria-orientation={vertical ? 'vertical' : 'horizontal'}
++          min={bounds.min} max={bounds.max} step="any"
++          style={{'--rawln-size-fill':`${(displayValue-bounds.min)/(bounds.max-bounds.min)*100}%`}}
++          value={displayValue} onChange={event=>{
++            const next=Number(event.currentTarget.value);
++            setDraft(next);
++            clearTimeout(timer.current);
++            timer.current=setTimeout(()=>{onChange(next);setDraft(null);},50);
++          }} />
++        <span className="rawln-size-key" aria-hidden="true">{after}</span>
++    </label>
++  );
++}
++
++export function ScoreSizeSliders({noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange, keyboardShortcuts=false, titles}) {
++  useEffect(() => {
++    if (!keyboardShortcuts) return;
++    const onKey = event => {
++      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.isComposing ||
++          event.target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], dialog[open]') ||
++          document.querySelector('dialog[open]')) return;
++      switch (event.key.toLowerCase()) {
++        case 'a': onTimeSpacingChange(clamp(timeSpacing-2, SPACING)); break;
++        case 'd': onTimeSpacingChange(clamp(timeSpacing+2, SPACING)); break;
++        case 'w': onNoteHeightChange(clamp(noteHeight-0.25, HEIGHT)); break;
++        case 's': onNoteHeightChange(clamp(noteHeight+0.25, HEIGHT)); break;
++        default: return;
++      }
++      event.preventDefault();
++    };
++    document.addEventListener('keydown',onKey);
++    return () => document.removeEventListener('keydown',onKey);
++  },[keyboardShortcuts,noteHeight,timeSpacing,onNoteHeightChange,onTimeSpacingChange]);
++
++  return (
++    <div className="rawln-size-sliders">
++      <SizeRange label="Time spacing" title={titles?.timeSpacing} value={timeSpacing} bounds={SPACING} onChange={onTimeSpacingChange} before="a" after="d" />
++      <SizeRange label="Note height" title={titles?.noteHeight} value={noteHeight} bounds={HEIGHT} onChange={onNoteHeightChange} before="w" after="s" vertical />
++    </div>
++  );
++}
+diff --git a/src/components/piano-legend.css b/src/components/piano-legend.css
+new file mode 100644
+index 0000000..6bf33f9
+--- /dev/null
++++ b/src/components/piano-legend.css
+@@ -0,0 +1,215 @@
++.rawln-piano-clearance {
++  display: block;
++  flex: none;
++  grid-column: 1 / -1;
++  width: 0;
++  height: max(0px, calc(var(--rawln-piano-needed-clearance) - var(--rawln-piano-existing-clearance, 0px)));
++  pointer-events: none;
++}
++.rawln-piano-legend {
++  --rawln-legend-viewport: 100vh;
++  --rawln-legend-top: calc(8px + env(safe-area-inset-top, 0px));
++  --rawln-legend-bottom: clamp(0px,
++    calc(var(--rawl-playback-footer-height, 25px) + 37px + env(safe-area-inset-bottom, 0px)),
++    calc(var(--rawln-legend-viewport) - var(--rawln-legend-top) - 70px));
++  position: fixed;
++  z-index: var(--rawl-piano-legend-z-index, 29);
++  right: max(42px, calc(34px + env(safe-area-inset-right, 0px)));
++  bottom: var(--rawln-legend-bottom);
++  width: max-content;
++  max-width: calc(100% - 54px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
++  color: white;
++  font: 12px/1.25 system-ui, sans-serif;
++}
++@supports (height: 100dvh) {
++  .rawln-piano-legend { --rawln-legend-viewport: 100dvh; }
++}
++.rawln-piano-legend[data-expanded="true"] {
++  display: flex;
++  flex-direction: column;
++  z-index: var(--rawl-piano-legend-z-index, 31);
++  width: 421px;
++  max-height: calc(var(--rawln-legend-viewport) - var(--rawln-legend-top) - var(--rawln-legend-bottom));
++}
++.rawln-piano-legend button, .rawln-piano-keys button { font: inherit; cursor: pointer; }
++.rawln-piano-legend button:focus-visible, .rawln-piano-keys button:focus-visible {
++  outline: 1px solid white;
++  outline-offset: 2px;
++}
++.rawln-piano-header {
++  display: flex;
++  flex: none;
++  align-items: center;
++  justify-content: space-between;
++}
++.rawln-piano-legend[data-expanded="true"] .rawln-piano-header {
++  border: 1px solid #666;
++  border-bottom: 0;
++  background: black;
++}
++.rawln-piano-fold {
++  border: 1px solid #666;
++  border-radius: 0;
++  background: black;
++  color: white;
++  display: grid;
++  justify-items: center;
++  gap: 4px;
++  min-width: 26px;
++  padding: 4px 7px;
++  text-align: center;
++}
++.rawln-piano-legend[data-expanded="true"] .rawln-piano-fold {
++  border: 0;
++}
++.rawln-piano-panel {
++  position: relative;
++  box-sizing: border-box;
++  min-height: 0;
++  overflow: auto;
++  overscroll-behavior: contain;
++  padding: 10px;
++  border: 1px solid #666;
++  background: black;
++}
++.rawln-piano-panel[hidden] { display: none; }
++.rawln-piano-names {
++  display: inline-flex;
++  align-items: center;
++  gap: 4px;
++  margin: 2px 5px;
++  padding: 2px 4px;
++  border: 0;
++  background: transparent;
++  color: #666;
++}
++.rawln-piano-names[aria-pressed="false"] .rawln-piano-name-roman,
++.rawln-piano-names[aria-pressed="true"] .rawln-piano-name-guitar {
++  color: white;
++}
++.rawln-piano-name-track {
++  position: relative;
++  width: 32px;
++  height: 16px;
++  border-radius: 8px;
++  background: #444;
++}
++.rawln-piano-names:hover .rawln-piano-name-track {
++  background: #555;
++}
++.rawln-piano-name-track::after {
++  position: absolute;
++  top: 2px;
++  left: 2px;
++  width: 12px;
++  height: 12px;
++  border-radius: 50%;
++  background: white;
++  content: "";
++  transition: transform .2s;
++}
++.rawln-piano-names[aria-pressed="true"] .rawln-piano-name-track::after {
++  transform: translateX(16px);
++}
++.rawln-piano-chords {
++  display: grid;
++  grid-template-columns: repeat(var(--rawln-piano-chord-count), minmax(0, 30px));
++  gap: clamp(2px, 1vw, 7px);
++}
++.rawln-piano-chord {
++  position: relative;
++  isolation: isolate;
++  min-width: 0;
++  padding: 0;
++  border: 0;
++  border-radius: 0;
++  color: white;
++  background: none;
++  text-align: center;
++}
++.rawln-piano-chord > span, .rawln-piano-chord > i {
++  position: absolute;
++  inset-inline: 0;
++  display: block;
++}
++.rawln-piano-chord > span { white-space: nowrap; font-family: Tahoma, sans-serif; }
++.rawln-piano-chord i { height: 6px; border-radius: 4px; }
++.rawln-piano-pitch-dot {
++  position: absolute;
++  top: 50%;
++  left: 50%;
++  transform: translate(-50%, -50%);
++  border-radius: 50%;
++  pointer-events: none;
++}
++.rawln-piano-chord i[data-playing="true"] { animation: rawln-piano-chord-pulse .6s ease-out; }
++.rawln-piano-mode-title { color: #aaa; margin-bottom: 10px; }
++.rawln-piano-octaves { display: flex; }
++.rawln-piano-keys {
++  --rawln-piano-key-height: 70px;
++  --rawln-piano-row-step: 40px;
++  --rawln-piano-key-gap: 2.5px;
++  position: relative;
++  flex: 1 1 199.5px;
++  width: 199.5px;
++  height: calc(var(--rawln-piano-key-height) + var(--rawln-piano-row-step));
++  user-select: none;
++}
++.rawln-piano-inline {
++  --rawln-piano-key-height: 24px;
++  --rawln-piano-row-step: 15px;
++  --rawln-piano-key-gap: 2px;
++  width: 84px;
++}
++.rawln-piano-keys .rawln-piano-key {
++  position: absolute;
++  top: var(--rawln-piano-row-step);
++  display: grid;
++  place-items: end center;
++  box-sizing: border-box;
++  width: calc(100% / 7 - var(--rawln-piano-key-gap));
++  height: var(--rawln-piano-key-height);
++  padding: 0 0 1px;
++  border: 0;
++  border-radius: 5px;
++  color: white;
++  text-shadow: .5px .5px black, -.5px .5px black, .5px -.5px black, -.5px -.5px black;
++  font: 700 16px/1.1 system-ui, sans-serif;
++  transform-origin: top center;
++}
++.rawln-piano-inline .rawln-piano-key { border-radius: 3px; }
++.rawln-piano-key[data-raised="true"] { top: 0; z-index: 2; }
++.rawln-piano-key[data-hidden="true"] { visibility: hidden; }
++.rawln-piano-key[data-active="true"] { z-index: 3; transform: scale(1.2); }
++.rawln-piano-key[data-playing="true"] { animation: rawln-piano-key-pulse .2s ease-out; }
++.rawln-piano-tonic {
++  position: absolute;
++  bottom: 18px;
++  left: 2px;
++  z-index: 3;
++  color: black;
++  text-shadow: none;
++  font-size: 14px;
++}
++.rawln-piano-scale-row {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 4px;
++  margin-top: 8px;
++}
++.rawln-piano-scale-row span, .rawln-piano-scale {
++  box-sizing: border-box;
++  padding: 2px 4px;
++  border: 0;
++  border-radius: 4px;
++  color: white;
++}
++.rawln-piano-scale-row > span:first-child { margin-right: 4px; }
++.rawln-piano-scale { text-shadow: 0 1px 2px black, 0 0 2px black; }
++@keyframes rawln-piano-chord-pulse { 30% { transform: scale(1.5); } }
++@keyframes rawln-piano-key-pulse { 50% { transform: scale(.95); } }
++@media (prefers-reduced-motion: reduce) {
++  .rawln-piano-chord i[data-playing="true"], .rawln-piano-key[data-playing="true"] { animation: none; }
++  .rawln-piano-name-track::after { transition: none; }
++}
+diff --git a/src/components/playback-footer.css b/src/components/playback-footer.css
+new file mode 100644
+index 0000000..fcfb14f
+--- /dev/null
++++ b/src/components/playback-footer.css
+@@ -0,0 +1,211 @@
++:root {
++  --rawl-playback-footer-height: 25px;
++}
++
++.rawlp-footer {
++  position: fixed;
++  inset: auto 0 0;
++  z-index: 20;
++  box-sizing: border-box;
++  min-height: calc(var(--rawl-playback-footer-height) + env(safe-area-inset-bottom, 0px));
++  padding: 0 10px env(safe-area-inset-bottom, 0px);
++  border-top: 1px solid var(--border, #444);
++  background: var(--background, #000);
++  color: var(--neutral4, #fff);
++  display: flex;
++  align-items: center;
++  gap: 8px 16px;
++  font: 13px/1.2 system-ui, sans-serif;
++  color-scheme: dark;
++}
++
++.rawlp-playback,
++.rawlp-options,
++.rawlp-tempo,
++.rawlp-volume,
++.rawlp-timeline {
++  display: flex;
++  align-items: center;
++}
++
++.rawlp-playback,
++.rawlp-options {
++  gap: 12px;
++}
++
++.rawlp-play {
++  box-sizing: border-box;
++  display: grid;
++  place-items: center;
++  width: 40px;
++  height: 24px;
++  padding: 0;
++  border: 0;
++  background: transparent;
++  color: inherit;
++  cursor: pointer;
++}
++
++.rawlp-footer button:focus-visible,
++.rawlp-footer input:focus-visible {
++  outline: 1px solid #ddd;
++  outline-offset: -1px;
++}
++
++.rawlp-footer button:disabled,
++.rawlp-footer input:disabled {
++  cursor: default;
++  opacity: .5;
++}
++
++.rawlp-timeline {
++  flex: 1;
++  min-width: 0;
++  gap: 10px;
++}
++
++.rawlp-time {
++  min-width: 4ch;
++  text-align: center;
++  white-space: nowrap;
++  font-variant-numeric: tabular-nums;
++}
++
++.rawlp-track {
++  position: relative;
++  flex: 1;
++  min-width: 0;
++  height: 24px;
++}
++
++.rawlp-marks {
++  position: absolute;
++  inset: 0 4px;
++  pointer-events: none;
++}
++
++.rawlp-marks i {
++  position: absolute;
++  display: block;
++}
++
++.rawlp-section-mark,
++.rawlp-phrase-mark {
++  bottom: 50%;
++  width: 1px;
++  background: #fff;
++  transform: translateX(-50%);
++}
++
++.rawlp-section-mark { height: 7.5px; }
++.rawlp-phrase-mark { height: 3.75px; }
++
++.rawlp-colored-mark {
++  top: calc(50% - 7.5px);
++  width: 10px;
++  height: 7.5px;
++}
++
++.rawlp-bass-bar {
++  top: 50%;
++  height: 7.5px;
++}
++
++.rawlp-track input {
++  position: absolute;
++  inset: 0;
++  appearance: none;
++  width: 100%;
++  height: 100%;
++  margin: 0;
++  background: transparent;
++  cursor: pointer;
++}
++
++.rawlp-track input::-webkit-slider-runnable-track {
++  background: transparent;
++}
++
++.rawlp-track input::-webkit-slider-thumb {
++  appearance: none;
++  width: 8px;
++  height: 24px;
++  border: 0;
++  border-radius: 0;
++  background: #fff;
++}
++
++.rawlp-track input::-moz-range-thumb {
++  width: 8px;
++  height: 24px;
++  border: 0;
++  border-radius: 0;
++  background: #fff;
++}
++
++.rawlp-tempo button {
++  display: grid;
++  place-items: center;
++  width: 24px;
++  height: 24px;
++  padding: 0;
++  color: #333;
++  font: bold 16px/1 "Times New Roman", serif;
++  border: 1px solid #999;
++  border-radius: 3px;
++  background: linear-gradient(#f8f8f8, #e0e0e0);
++  cursor: pointer;
++}
++
++.rawlp-tempo button span {
++  display: grid;
++  line-height: .7;
++}
++
++.rawlp-tempo button i {
++  font-style: normal;
++}
++
++.rawlp-tempo > span {
++  width: 4.5ch;
++  text-align: center;
++  font-family: monospace;
++}
++
++.rawlp-volume {
++  flex: 0 0 auto;
++  gap: 8px;
++}
++
++.rawlp-volume input {
++  width: clamp(48px, 8vw, 100px);
++  margin: 0;
++  accent-color: #fff;
++  cursor: pointer;
++}
++
++@media (max-width: 600px) {
++  :root {
++    --rawl-playback-footer-height: 64px;
++  }
++
++  .rawlp-footer {
++    display: grid;
++    grid-template-columns: auto minmax(0, 1fr);
++    grid-template-rows: 31px 31px;
++    gap: 0 4px;
++  }
++
++  .rawlp-options {
++    grid-column: 2;
++    gap: 20px;
++  }
++
++  .rawlp-timeline {
++    gap: 6px;
++  }
++
++  .rawlp-volume input {
++    width: clamp(48px, 19vw, 100px);
++  }
++}
+diff --git a/src/components/playback-position.js b/src/components/playback-position.js
+new file mode 100644
+index 0000000..f7aaff8
+--- /dev/null
++++ b/src/components/playback-position.js
+@@ -0,0 +1,10 @@
++/** Paint from the audio clock at display cadence, including on start and resume. */
++export function observePlaybackPosition(readPosition, paintPosition) {
++  let frame;
++  function tick() {
++    paintPosition(readPosition());
++    frame = requestAnimationFrame(tick);
++  }
++  tick();
++  return () => cancelAnimationFrame(frame);
++}
+diff --git a/src/components/score-pinch.ts b/src/components/score-pinch.ts
+new file mode 100644
+index 0000000..743c65f
+--- /dev/null
++++ b/src/components/score-pinch.ts
+@@ -0,0 +1,220 @@
++// Ported from Rawl useScorePinch.ts (GPL-3.0-only).
++import React, {
++  MutableRefObject,
++  ReactNode,
++  RefObject,
++  useEffect,
++  useLayoutEffect,
++  useReducer,
++  useRef,
++} from "react";
++import { unstable_batchedUpdates } from "react-dom";
++const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
++
++// Freeze the rendered score during a gesture. Chrome can scale its cached paint
++// layer without recalculating note rectangles or reconciling thousands of notes.
++export const ScorePinchContent = React.memo(
++  ({
++    children,
++    fitWidth = false,
++  }: {
++    children: ReactNode;
++    activeRef: MutableRefObject<boolean>;
++    fitWidth?: boolean;
++  }) =>
++    React.createElement(
++      "div",
++      {
++        "data-score-pinch-content": "",
++        // Include section end margins in the scrollable width, even when the
++        // score is wider than the viewport.
++        style: { width: fitWidth ? "100%" : "max-content", minWidth: "100%" },
++      },
++      children,
++    ),
++  (previous, next) =>
++    next.activeRef.current || (previous.children === next.children && previous.fitWidth === next.fitWidth),
++);
++
++type Dimensions = { noteHeight: number; secondWidth: number };
++type PinchAxis = "horizontal" | "vertical";
++
++export function useScorePinch(
++  containerRef: RefObject<HTMLDivElement | null>,
++  noteHeight: number,
++  secondWidth: number,
++  setNoteHeight: (height: number) => void,
++  setSecondWidth: (width: number) => void,
++  enabled = true,
++) {
++  const dimensions = useRef({ noteHeight, secondWidth });
++  dimensions.current = { noteHeight, secondWidth };
++  const activeRef = useRef(false);
++  const clearPreviewRef = useRef<(() => void) | null>(null);
++  const [, refreshScore] = useReducer((revision: number) => revision + 1, 0);
++
++  // Keep the preview visible until the real score has committed, then replace
++  // it before paint. This also refreshes playback after a cancelled/no-op pinch.
++  useLayoutEffect(() => {
++    if (!activeRef.current) clearPreviewRef.current?.();
++  });
++
++  useEffect(() => {
++    const container = containerRef.current;
++    const content = container?.querySelector<HTMLDivElement>(
++      "[data-score-pinch-content]",
++    );
++    if (!container || !content || !enabled) return;
++
++    let base: Dimensions | null = null;
++    let pending: Dimensions | null = null;
++    let wheelTimer: ReturnType<typeof setTimeout> | undefined;
++    let touchPinch: { ids: number[]; x: number; y: number } | null = null;
++    let axis: PinchAxis | null = null;
++
++    const clearPreview = () => {
++      content.style.transform = "";
++      content.style.transformOrigin = "";
++      content.style.willChange = "";
++      content.style.pointerEvents = "";
++      container.removeAttribute("data-score-pinching");
++    };
++    clearPreviewRef.current = clearPreview;
++
++    const begin = (clientX: number, clientY: number) => {
++      if (base) return;
++      base = { ...dimensions.current };
++      pending = { ...base };
++      activeRef.current = true;
++      const rect = content.getBoundingClientRect();
++      content.style.transformOrigin = `${clientX - rect.left}px ${
++        clientY - rect.top
++      }px`;
++      content.style.willChange = "transform";
++      content.style.pointerEvents = "none";
++      container.setAttribute("data-score-pinching", "true");
++    };
++
++    const preview = (next: Dimensions) => {
++      if (!base) return;
++      pending = {
++        secondWidth:
++          axis === "horizontal"
++            ? clamp(next.secondWidth, 2, 150)
++            : base.secondWidth,
++        noteHeight:
++          axis === "vertical" ? clamp(next.noteHeight, 1, 10) : base.noteHeight,
++      };
++      content.style.transform = `scale(${
++        pending.secondWidth / base.secondWidth
++      }, ${pending.noteHeight / base.noteHeight})`;
++    };
++
++    const finish = (commit = true) => {
++      clearTimeout(wheelTimer);
++      touchPinch = null;
++      axis = null;
++      if (!base || !pending) return;
++      const next = commit ? pending : base;
++      base = null;
++      pending = null;
++      activeRef.current = false;
++      unstable_batchedUpdates(() => {
++        setSecondWidth(next.secondWidth);
++        setNoteHeight(next.noteHeight);
++        refreshScore();
++      });
++    };
++
++    const onWheel = (event: WheelEvent) => {
++      // Chrome exposes trackpad pinch as Ctrl+wheel, without a release event.
++      if (!event.ctrlKey || touchPinch) return;
++      event.preventDefault();
++      begin(event.clientX, event.clientY);
++      // Wheel pinch contains no finger orientation; Shift selects the vertical
++      // axis at the start. Keep that axis even if Shift changes mid-gesture.
++      if (!axis) axis = event.shiftKey ? "vertical" : "horizontal";
++      const delta =
++        event.deltaY *
++        (event.deltaMode === 1
++          ? 16
++          : event.deltaMode === 2
++          ? container.clientHeight
++          : 1);
++      const scale = Math.exp(-clamp(delta, -100, 100) * 0.01);
++      preview({
++        secondWidth: pending.secondWidth * scale,
++        noteHeight: pending.noteHeight * scale,
++      });
++      clearTimeout(wheelTimer);
++      wheelTimer = setTimeout(() => finish(), 150);
++    };
++
++    const onTouchStart = (event: TouchEvent) => {
++      if (event.touches.length !== 2) {
++        finish();
++        return;
++      }
++      event.preventDefault();
++      finish();
++      const [a, b] = Array.from(event.touches);
++      begin((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
++      touchPinch = {
++        ids: [a.identifier, b.identifier],
++        x: Math.abs(a.clientX - b.clientX),
++        y: Math.abs(a.clientY - b.clientY),
++      };
++    };
++
++    const onTouchMove = (event: TouchEvent) => {
++      if (!touchPinch || !base || event.touches.length !== 2) return;
++      event.preventDefault();
++      const touches = Array.from(event.touches);
++      const a = touches.find((touch) => touch.identifier === touchPinch.ids[0]);
++      const b = touches.find((touch) => touch.identifier === touchPinch.ids[1]);
++      if (!a || !b) return;
++      const x = Math.abs(a.clientX - b.clientX);
++      const y = Math.abs(a.clientY - b.clientY);
++      if (!axis) {
++        // Wait for a clear direction instead of letting jitter or a diagonal
++        // start choose an axis. Once chosen it cannot change until release.
++        const dx = touchPinch.x >= 24 ? Math.abs(x - touchPinch.x) : 0;
++        const dy = touchPinch.y >= 24 ? Math.abs(y - touchPinch.y) : 0;
++        if (Math.max(dx, dy) < 3) return;
++        if (dx > dy * 1.5) axis = "horizontal";
++        else if (dy > dx * 1.5) axis = "vertical";
++        else return;
++      }
++      preview({
++        secondWidth:
++          base.secondWidth * (touchPinch.x >= 24 ? x / touchPinch.x : 1),
++        noteHeight:
++          base.noteHeight * (touchPinch.y >= 24 ? y / touchPinch.y : 1),
++      });
++    };
++    const onTouchEnd = () => finish();
++    const onTouchCancel = () => finish(false);
++    const onBlur = () => finish();
++
++    container.addEventListener("wheel", onWheel, { passive: false });
++    container.addEventListener("touchstart", onTouchStart, { passive: false });
++    container.addEventListener("touchmove", onTouchMove, { passive: false });
++    container.addEventListener("touchend", onTouchEnd);
++    container.addEventListener("touchcancel", onTouchCancel);
++    window.addEventListener("blur", onBlur);
++    return () => {
++      clearTimeout(wheelTimer);
++      activeRef.current = false;
++      clearPreview();
++      clearPreviewRef.current = null;
++      container.removeEventListener("wheel", onWheel);
++      container.removeEventListener("touchstart", onTouchStart);
++      container.removeEventListener("touchmove", onTouchMove);
++      container.removeEventListener("touchend", onTouchEnd);
++      container.removeEventListener("touchcancel", onTouchCancel);
++      window.removeEventListener("blur", onBlur);
++    };
++  }, [containerRef, enabled, setNoteHeight, setSecondWidth]);
++
++  return activeRef;
++}
+diff --git a/src/components/score-size-sliders.css b/src/components/score-size-sliders.css
+new file mode 100644
+index 0000000..221f37b
+--- /dev/null
++++ b/src/components/score-size-sliders.css
+@@ -0,0 +1,79 @@
++.rawln-size-sliders {
++  --rawln-size-side: max(clamp(12px, 2.3vw, 33px), env(safe-area-inset-right, 0px));
++  position: fixed;
++  right: var(--rawln-size-side);
++  bottom: calc(var(--rawl-playback-footer-height, 25px) + 10px + env(safe-area-inset-bottom, 0px));
++  z-index: var(--rawl-size-sliders-z-index, 30);
++}
++
++.rawln-size-option {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++}
++
++.rawln-size-option-height {
++  position: absolute;
++  right: calc(max(12px, env(safe-area-inset-right, 0px)) - var(--rawln-size-side));
++  bottom: calc(100% + 6px);
++  flex-direction: column;
++}
++
++.rawln-size-key {
++  font: 10px/1 monospace;
++  color: #fff;
++  text-shadow: 0 1px 3px #000, 0 0 3px #000;
++}
++
++.rawln-size-sliders input {
++  --rawln-size-track-direction: to right;
++  appearance: none;
++  inline-size: clamp(104px, 28vw, 240px);
++  block-size: 24px;
++  margin: 0;
++  direction: ltr;
++  background: transparent;
++  cursor: pointer;
++}
++
++.rawln-size-option-height input {
++  --rawln-size-track-direction: to bottom;
++  writing-mode: vertical-lr;
++  inline-size: clamp(80px, 22dvh, 160px);
++}
++
++.rawln-size-sliders input::-webkit-slider-runnable-track {
++  box-sizing: border-box;
++  block-size: 4px;
++  border: 1px solid #888;
++  border-radius: 2px;
++  background: linear-gradient(var(--rawln-size-track-direction), #fff var(--rawln-size-fill), #000 var(--rawln-size-fill));
++}
++
++.rawln-size-sliders input::-webkit-slider-thumb {
++  appearance: none;
++  width: 14px;
++  height: 14px;
++  margin-block-start: -6px;
++  border: 1px solid #aaa;
++  border-radius: 50%;
++  background: #fff;
++}
++
++.rawln-size-sliders input::-moz-range-track {
++  box-sizing: border-box;
++  block-size: 4px;
++  border: 1px solid #888;
++  border-radius: 2px;
++  background: linear-gradient(var(--rawln-size-track-direction), #fff var(--rawln-size-fill), #000 var(--rawln-size-fill));
++}
++
++.rawln-size-sliders input::-moz-range-thumb {
++  width: 12px;
++  height: 12px;
++  border: 1px solid #aaa;
++  border-radius: 50%;
++  background: #fff;
++}
++
++.rawln-size-sliders input:focus-visible { outline: 1px solid #ddd; outline-offset: 2px; }
+diff --git a/src/index.jsx b/src/index.jsx
+index bf534f8..e23de92 100644
+--- a/src/index.jsx
++++ b/src/index.jsx
+@@ -1,8 +1,14 @@
+ export * from './notation/RawlNotation.jsx';
+ export {TonicSymbol} from './components/TonicSymbol.jsx';
++export {PlaybackFooter} from './components/PlaybackFooter.jsx';
+ export {createSoundFontPlayback} from './audio/soundfont-playback.js';
+ export {createTransport} from './audio/transport.js';
+ export {useTonicRecoloring,recolorModulation,recolorBoundary} from './notation/recolor.jsx';
+ export {bindTempoKeys} from './audio/tempo-keys.js';
++export {bindPlaybackKeys} from './audio/playback-keys.js';
+
+ export {createShiftHoverAudition} from './shift-hover-audition.js';
++
++export {RomanNumeral} from './components/RomanNumeral.jsx';
++export {ScoreSizeSliders} from './components/ScoreSizeSliders.jsx';
++export {PianoLegend,InlinePianoLegend,FoldablePianoLegend} from './components/PianoLegend.jsx';
+diff --git a/src/notation/PlaybackMeasureBorders.jsx b/src/notation/PlaybackMeasureBorders.jsx
+new file mode 100644
+index 0000000..46f1381
+--- /dev/null
++++ b/src/notation/PlaybackMeasureBorders.jsx
+@@ -0,0 +1,12 @@
++import React, {forwardRef} from 'react';
++
++// Rawl AnalysisGrid paints each edge just outside the score body.
++export const PlaybackMeasureBorders = forwardRef(function PlaybackMeasureBorders({
++ left,width,top=true,bottom=true,hidden=false,
++},ref){
++ return <div aria-hidden="true" className="rawln-playback-measure" hidden={hidden} ref={ref} style={{
++  position:'absolute',left,width,top:-1,bottom:-1,pointerEvents:'none',zIndex:4,
++  borderTop:top?'1px solid #444':undefined,
++  borderBottom:bottom?'1px solid #444':undefined,
++ }}/>;
++});
+diff --git a/src/notation/RawlNotation.jsx b/src/notation/RawlNotation.jsx
+index 05760b3..c2668d4 100644
+--- a/src/notation/RawlNotation.jsx
++++ b/src/notation/RawlNotation.jsx
+@@ -1,15 +1,67 @@
+ import React,{forwardRef,useImperativeHandle,useLayoutEffect,useMemo,useRef,useState} from 'react';
+-import {pitchRange,staveGeometry,tonalSegments,tonalLines,tonicAt,mod,NOTE_HEIGHT,TONIC_NAMES,measureHeaderLayout} from './geometry.mjs';
++import {pitchRange,staveGeometry,tonalSegments,tonalLines,tonicAt,mod,TONIC_NAMES,measureHeaderLayout} from './geometry.mjs';
+ import {RAWL_COLORS} from './palette.mjs';
+ import {TonicSymbol} from '../components/TonicSymbol.jsx';
++import {PlaybackMeasureBorders} from './PlaybackMeasureBorders.jsx';
+ import {NoteLayer,NotePlaybackContext,PlaybackSectionContext,createSectionPlaybackClock} from 'librawl/native';
+
+ import {useTonicRecoloring} from './recolor.jsx';
+
+ const EMPTY_CHANGES=[];
++const atRowStart=(beat,start)=>Math.abs(beat-start)<1e-7;
+ const names=['C','D♭','D','E♭','E','F','F♯','G','A♭','A','B♭','B'];
+ const noteName=p=>names[mod(p)]+(Math.floor(p/12)-1);
+
++export {PlaybackMeasureBorders} from './PlaybackMeasureBorders.jsx';
++
++export function PlaybackMeasureLayer({row,clock,measureMap,barBeats=4}){
++ const border=useRef(null),{start,end}=row;
++ useLayoutEffect(()=>{
++  const element=border.current,span=end-start;
++  if(!(span>0))return;
++  const active=new Set(),unregister=[];
++  const first=Math.max(0,Math.floor(start/barBeats))*barBeats;
++  const measures=measureMap??(Number.isFinite(barBeats)&&barBeats>0
++   ? Array.from({length:Math.ceil((end-first)/barBeats)},(_,index)=>({
++     start:first+index*barBeats,duration:barBeats,sourceNumber:first/barBeats+index+1,
++    }))
++   : []);
++  const rowSection=[start,end];
++  element.hidden=true;
++  delete element.dataset.measure;
++  for(const measure of measures){
++   const from=Math.max(start,measure.start),to=Math.min(end,measure.start+measure.duration);
++   if(to<=from)continue;
++   // Internal barlines occupy the pixel before their beat. The opening
++   // line uses the first visible pixel, and the right edge still meets its barline.
++   const beginsRow=atRowStart(from,start);
++   const left=beginsRow?'0px':`calc(${(from-start)/span*100}% - 1px)`;
++   const widthPercent=`${(to-from)/span*100}%`;
++   const width=beginsRow?widthPercent:`calc(${widthPercent} + 1px)`;
++   const times=measure.playbackSpans??[[measure.start,measure.start+measure.duration]];
++   for(const [timeStart,timeEnd] of times){
++    const scale=(timeEnd-timeStart)/measure.duration;
++    const entry={left,width,number:measure.sourceNumber};
++    unregister.push(clock.register(
++     timeStart+(from-measure.start)*scale,timeStart+(to-measure.start)*scale,
++     playing=>{
++      if(playing)active.add(entry);
++      else if(!active.delete(entry))return;
++      const current=Array.from(active).at(-1);
++      element.hidden=!current;
++      if(!current){delete element.dataset.measure;return;}
++      element.dataset.measure=current.number;
++      element.style.left=current.left;
++      element.style.width=current.width;
++     },measure.playbackSpans===undefined?rowSection:null,
++    ));
++   }
++  }
++  return ()=>unregister.forEach(remove=>remove());
++ },[start,end,clock,measureMap,barBeats]);
++ return <PlaybackMeasureBorders ref={border} hidden/>;
++}
++
+ /** Rawl AnalysisGrid's header and vertical grid, shared by all host views. */
+ export function RawlMeasureHeader({row,height='100%',tonic=0,changes=EMPTY_CHANGES,barBeats=4,beatBeats=1,phraseStarts,measureMap,selectedMeasure=null,onMeasureSelect,hideInitialTonic=false}){
+  const element=useRef(null),[width,setWidth]=useState(0);
+@@ -21,7 +73,7 @@ export function RawlMeasureHeader({row,height='100%',tonic=0,changes=EMPTY_CHANG
+  const {measures,beats,markers}=useMemo(()=>measureHeaderLayout({row,tonic,changes,barBeats,beatBeats,phraseStarts,measureMap,width,selectedMeasure,hideInitialTonic}),[row,tonic,changes,barBeats,beatBeats,phraseStarts,measureMap,width,selectedMeasure,hideInitialTonic]);
+  const x=beat=>(beat-row.start)/(row.end-row.start)*100;
+  return <div ref={element} className="rawln-measure-grid" style={{height}}>
+-  {measures.map(measure=><div className={'rawln-bar'+(measure.isPhraseStart?' rawln-phrase-bar':'')} key={'bar-'+measure.beat} data-beat={measure.beat} data-phrase-boundary={measure.isPhraseStart?'true':undefined} data-terminal={measure.terminal?'true':undefined} style={{left:`calc(${measure.left}% - 1px)`,backgroundColor:measure.isPhraseStart?'#bbb':'#444'}}/>)}
++  {measures.map(measure=><div className={'rawln-bar'+(measure.isPhraseStart?' rawln-phrase-bar':'')} key={'bar-'+measure.beat} data-beat={measure.beat} data-phrase-boundary={measure.isPhraseStart?'true':undefined} data-terminal={measure.terminal?'true':undefined} style={{left:atRowStart(measure.beat,row.start)?0:`calc(${measure.left}% - 1px)`}}/>)}
+   {beats.map(beat=><div className="rawln-beat-bar" key={'beat-'+beat} data-beat={beat} style={{left:x(beat)+'%'}}/>)}
+   <div className="rawln-modulations">
+    {markers.map(marker=><div key={marker.beat} className="rawln-modulation" data-beat={marker.beat} data-tonic={marker.tonic} data-join={marker.join?marker.name:undefined} data-onset-override={marker.onsetOverride?'true':undefined} data-origin-beat={marker.originBeat} data-continued={marker.continued?'true':undefined} style={{left:marker.pixelOffset?`calc(${marker.left}% - 1px)`:marker.left+'%'}} title={marker.name}>
+@@ -29,14 +81,36 @@ export function RawlMeasureHeader({row,height='100%',tonic=0,changes=EMPTY_CHANG
+    </div>)}
+   </div>
+   <div className="rawln-measure-labels" aria-hidden={onMeasureSelect?undefined:true}>
+-   {measures.filter(measure=>!measure.terminal).map(measure=><div className="rawln-measure-number" role={onMeasureSelect?'button':undefined} tabIndex={onMeasureSelect?0:undefined} aria-pressed={onMeasureSelect?selectedMeasure===measure.beat:undefined} onClick={onMeasureSelect?event=>{event.stopPropagation();onMeasureSelect(measure.beat);}:undefined} onKeyDown={onMeasureSelect?event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();onMeasureSelect(measure.beat);}}:undefined} key={measure.beat} data-beat={measure.beat} data-modulation={measure.hasModulation?'true':undefined} style={{left:`calc(${measure.left}% + 6px)`,color:measure.color,pointerEvents:onMeasureSelect?'auto':undefined,cursor:onMeasureSelect?'pointer':undefined}}><span>{measure.number}</span></div>)}
++   {measures.filter(measure=>!measure.terminal).map(measure=><div
++    className="rawln-measure-position" key={measure.beat}
++    style={{gridTemplateColumns:`minmax(0, calc(${measure.left}% + 6px)) max-content`}}>
++    <div className="rawln-measure-number"
++     role={onMeasureSelect?'button':undefined} tabIndex={onMeasureSelect?0:undefined}
++     aria-pressed={onMeasureSelect?selectedMeasure===measure.beat:undefined}
++     onClick={onMeasureSelect?event=>{event.stopPropagation();onMeasureSelect(measure.beat);}:undefined}
++     onKeyDown={onMeasureSelect?event=>{
++      if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();onMeasureSelect(measure.beat);}
++     }:undefined}
++     data-beat={measure.beat} data-modulation={measure.hasModulation?'true':undefined}
++     style={{color:measure.color,pointerEvents:onMeasureSelect?'auto':undefined,cursor:onMeasureSelect?'pointer':undefined}}>
++     <span>{measure.number}</span>
++    </div>
++   </div>)}
+   </div>
+  </div>;
+ }
+
++function notePlaybackSpan(note,row,independentPlayback){
++ if(!independentPlayback)return [note.start,note.start+note.duration];
++ const [start,end]=note.playbackSpan??[note.start,note.start+note.duration];
++ const scale=(end-start)/note.duration;
++ return [start+Math.max(0,row.start-note.start)*scale,end-Math.max(0,note.start+note.duration-row.end)*scale];
++}
++
+ /** Adapt authored quarter beats to the native renderer without changing source data. */
+ function BeatNoteLayer({visible,row,axis,tonic,changes,mutedVoices,hoveredKey,setHoveredKey,hoveredRef,onNote,onNoteAudition,auditionEnabled,onNoteHover,clock}){
+  const host=useRef(null),[pixelWidth,setPixelWidth]=useState(100),span=row.end-row.start,section=useMemo(()=>[row.start,row.end],[row.start,row.end]);
++ const independentPlayback=visible.some(note=>note.playbackSpan!==undefined),playbackSection=independentPlayback?null:section;
+  useLayoutEffect(()=>{
+   const element=host.current.parentElement,view=element.ownerDocument.defaultView,fit=()=>{const width=element.getBoundingClientRect().width||element.clientWidth||100;setPixelWidth(previous=>previous===width?previous:width);},Observer=view?.ResizeObserver??globalThis.ResizeObserver;
+   fit();const observer=Observer?new Observer(fit):null;observer?.observe(element);view?.addEventListener('resize',fit);
+@@ -45,55 +119,59 @@ function BeatNoteLayer({visible,row,axis,tonic,changes,mutedVoices,hoveredKey,se
+  const sourceById=useMemo(()=>new Map(visible.map(note=>[String(note.id),note])),[visible]);
+  const nativeNotes=useMemo(()=>visible.map(note=>{
+   const degree=mod(note.pitch-tonicAt(tonic,changes,note.start+note.duration/2)),muted=mutedVoices.includes(note.voice);
+-  return {id:String(note.id),note:{midiNumber:note.pitch},span:[note.start,note.start+note.duration],displaySpan:[Math.max(row.start,note.start),Math.min(row.end,note.start+note.duration)],voiceIndex:note.voice??0,displayVoiceIndex:note.voice??0,isDrum:false,isActive:!muted,color:`noteColor_${degree}_colors`,colorPitchClass:degree,noteUnderCursor:hoveredKey===`${note.id}:${row.start}`,velocity:note.velocity,...(note.pitchBend?{pitchBend:note.pitchBend}:{}),...(note.sourceLocation?{sourceLocation:note.sourceLocation}:{})};
+- }),[visible,row.start,row.end,tonic,changes,mutedVoices,hoveredKey]);
++  return {id:String(note.id),note:{midiNumber:note.pitch},span:notePlaybackSpan(note,row,independentPlayback),displaySpan:[Math.max(row.start,note.start),Math.min(row.end,note.start+note.duration)],voiceIndex:note.voice??0,displayVoiceIndex:note.voice??0,isDrum:false,isActive:!muted,color:`noteColor_${degree}_colors`,colorPitchClass:degree,noteUnderCursor:hoveredKey===`${note.id}:${row.start}`,velocity:note.velocity,...(note.pitchBend?{pitchBend:note.pitchBend}:{}),...(note.sourceLocation?{sourceLocation:note.sourceLocation}:{})};
++ }),[visible,row.start,row.end,independentPlayback,tonic,changes,mutedVoices,hoveredKey]);
+  // Preserve the host's compatibility class without duplicating note geometry.
+  // Both the native renderer and this small notification use the same index.
+  useLayoutEffect(()=>{
++  const nativeById=new Map(nativeNotes.map(note=>[note.id,note]));
+   const unregister=[...host.current.querySelectorAll('[data-note]')].map(element=>{
+-   const note=sourceById.get(element.dataset.note),muted=mutedVoices.includes(note.voice);
+-   return clock.register(note.start,note.start+note.duration,active=>element.classList.toggle('rawln-sounding',active&&!muted),section);
++   const note=nativeById.get(element.dataset.note);
++   return clock.register(...note.span,active=>element.classList.toggle('rawln-sounding',active&&note.isActive),playbackSection);
+   });
+   return()=>unregister.forEach(remove=>remove());
+- },[clock,nativeNotes,sourceById,section,mutedVoices]);
++ },[clock,nativeNotes,playbackSection]);
+  const hover=note=>{
+   const original=sourceById.get(note.id),key=`${original.id}:${row.start}`;
+   if(hoveredRef.current===key)return;
+   hoveredRef.current=key;setHoveredKey(key);onNoteHover?.(original);
+  };
+  const leave=()=>{if(hoveredRef.current===null)return;hoveredRef.current=null;setHoveredKey(null);onNoteHover?.(null);};
+- return <div ref={host} style={{display:'contents'}}><PlaybackSectionContext.Provider value={section}><NoteLayer notes={nativeNotes} midiNumberToY={pitch=>axis.pitchToY(pitch)+NOTE_HEIGHT/2} noteHeight={NOTE_HEIGHT/2} secondsToX={beat=>(beat-row.start)/span*pixelWidth} handleNoteClick={note=>onNote?.(sourceById.get(note.id))} handleMouseEnter={hover} handleMouseLeave={leave} onNoteAudition={onNoteAudition?note=>onNoteAudition(sourceById.get(note.id)):undefined} auditionEnabled={auditionEnabled} getNoteAttributes={note=>{
++ return <div ref={host} style={{display:'contents'}}><PlaybackSectionContext.Provider value={playbackSection}><NoteLayer notes={nativeNotes} midiNumberToY={pitch=>axis.pitchToY(pitch)+axis.glyphHeight/2} noteHeight={axis.glyphHeight/2} secondsToX={beat=>(beat-row.start)/span*pixelWidth} handleNoteClick={note=>onNote?.(sourceById.get(note.id))} handleMouseEnter={hover} handleMouseLeave={leave} onNoteAudition={onNoteAudition?note=>onNoteAudition(sourceById.get(note.id)):undefined} auditionEnabled={auditionEnabled} getNoteAttributes={note=>{
+   const original=sourceById.get(note.id),start=note.displaySpan[0],end=note.displaySpan[1],degree=note.colorPitchClass,muted=mutedVoices.includes(original.voice);
+   return {role:'button',tabIndex:-1,'aria-label':noteName(original.pitch),'data-note':original.id,'data-pitch':original.pitch,'data-degree':degree,'data-voice':original.voice,className:`rawln-note rawln-voice-${original.voice}${muted?' rawln-muted':''}`,style:{left:(start-row.start)/span*100+'%',width:(end-start)/span*100+'%',...(!note.pitchBend?.length&&RAWL_COLORS[degree]?{background:RAWL_COLORS[degree].background}:{}),zIndex:100+(84-original.pitch)+(original.voice===1?128:0)}};
+  }}/></PlaybackSectionContext.Provider></div>;
+ }
+
+ /** A host-independent Rawl score. Times are quarter-note beats, pitches MIDI. */
+-export const RawlNotation=forwardRef(function RawlNotation({notes,beats,rows,tonic=0,changes=EMPTY_CHANGES,barBeats=4,beatBeats=1,phraseStarts,measureMap,hideInitialTonic=false,position=null,mutedVoices=[],onSeek,onNote,onNoteAudition,onNoteHover,onMeasureSelect,selectedMeasure=null,onChangesChange,recolorable=true,renderHeader,renderFooter,className='',style},ref){
++export const RawlNotation=forwardRef(function RawlNotation({notes,beats,rows,tonic=0,changes=EMPTY_CHANGES,barBeats=4,beatBeats=1,phraseStarts,measureMap,hideInitialTonic=false,showTonalGuides=true,noteScale=1,position,playbackClock,mutedVoices=[],onSeek,onNote,onNoteAudition,onNoteHover,onMeasureSelect,selectedMeasure=null,onChangesChange,recolorable=true,renderHeader,renderUnderlay,renderFooter,className='',style},ref){
++ const root=useRef(null),hoveredRef=useRef(null),[hoveredKey,setHoveredKey]=useState(null),ownClock=useMemo(createSectionPlaybackClock,[]),clock=playbackClock??ownClock;
+  const audition=onNoteAudition??onNote;
++ const seek=onSeek??(beat=>playbackClock?.seek?playbackClock.seek(beat):clock.advance(beat));
+  const editor=useTonicRecoloring({changes,barBeats,measureMap,onChange:onChangesChange}),automatic=recolorable&&!onMeasureSelect;
+- if(automatic){changes=editor.changes;selectedMeasure=editor.selectedMeasure;onMeasureSelect=editor.selectMeasure;const originalClick=onNote,originalHover=onNoteHover;onNote=note=>{if(!editor.chooseNote(note))originalClick?.(note);};onNoteHover=note=>{editor.hoverNote(note);originalHover?.(note);};}
+- const root=useRef(null),hoveredRef=useRef(null),[hoveredKey,setHoveredKey]=useState(null),clock=useMemo(createSectionPlaybackClock,[]);
++ if(automatic){changes=editor.changes;selectedMeasure=editor.selectedMeasure;onMeasureSelect=editor.selectMeasure;const originalHover=onNoteHover;onNoteHover=note=>{editor.hoverNote(note);originalHover?.(note);};}
+  const spans=rows?.length?rows:[{start:0,end:beats,label:1}];
+  const prepared=useMemo(()=>spans.map(row=>{
+-  const visible=notes.filter(n=>n.start<row.end-1e-6&&n.start+n.duration>row.start+1e-6),range=pitchRange(visible),axis=staveGeometry(range);
+-  return {row,visible,range,axis,regions:tonalSegments(tonic,changes,row.start,row.end)};
+- }),[notes,rows,beats,tonic,changes]);
++  const visible=notes.filter(n=>n.start<row.end-1e-6&&n.start+n.duration>row.start+1e-6),range=pitchRange(visible),axis=staveGeometry(range,{noteScale});
++  return {row,visible,range,axis,regions:showTonalGuides?tonalSegments(tonic,changes,row.start,row.end):[]};
++ }),[notes,rows,beats,tonic,changes,noteScale,showTonalGuides]);
+  const setPosition=beat=>Number.isFinite(beat)?clock.advance(beat):clock.reset();
+  useImperativeHandle(ref,()=>({setPosition,element:root.current}),[clock]);
+- useLayoutEffect(()=>{setPosition(position);},[position]);
+- useLayoutEffect(()=>()=>clock.reset(),[clock]);
++ useLayoutEffect(()=>{if(position!==undefined||!playbackClock)setPosition(position);},[position,clock,playbackClock]);
++ useLayoutEffect(()=>()=>ownClock.reset(),[ownClock]);
+  return <NotePlaybackContext.Provider value={clock.register}><div className={'rawln'+(className?' '+className:'')} style={style} ref={root}>
+   {prepared.map(({row,visible,range,axis,regions})=>{
+    const span=row.end-row.start,x=beat=>(beat-row.start)/span*100;
+    return <div className="rawln-row" data-section={row.section} key={`${row.start}-${row.end}`} data-start={row.start} data-end={row.end} style={row.style}>
+     {renderHeader&&<div className="rawln-header">{renderHeader(row)}</div>}
+-    <div className="rawln-score" role="group" aria-label="Rawl notation" style={{height:axis.notesBottom}} onClick={e=>{const box=e.currentTarget.getBoundingClientRect();if(box.width>0)onSeek?.(row.start+Math.max(0,Math.min(1,(e.clientX-box.left)/box.width))*span);}}>
++    <div className="rawln-score" data-seekable={selectedMeasure===null||undefined} role="group" aria-label="Rawl notation" style={{height:axis.notesBottom}} onClick={e=>{if(selectedMeasure!==null)return;const box=e.currentTarget.getBoundingClientRect();if(box.width>0)seek(row.start+Math.max(0,Math.min(1,(e.clientX-box.left)/box.width))*span);}}>
++     <PlaybackMeasureLayer row={row} clock={clock} measureMap={measureMap} barBeats={barBeats}/>
+      <div className="rawln-grid" aria-hidden="true">
+       {regions.flatMap((region,i)=>tonalLines(range,axis,region.tonic).map((line,j)=><div key={`${i}-${j}`} data-tonic={region.tonic} className={`rawln-${line.kind}-line`} style={{left:x(region.start)+'%',width:(region.end-region.start)/span*100+'%',top:line.y}}/>))}
+      </div>
++     {renderUnderlay?.(row,axis)}
+      <RawlMeasureHeader row={row} height={axis.notesBottom} tonic={tonic} changes={changes} barBeats={barBeats} beatBeats={beatBeats} phraseStarts={phraseStarts} measureMap={measureMap} selectedMeasure={selectedMeasure} onMeasureSelect={onMeasureSelect} hideInitialTonic={hideInitialTonic}/>
+-     <BeatNoteLayer visible={visible} row={row} axis={axis} tonic={tonic} changes={changes} mutedVoices={mutedVoices} hoveredKey={hoveredKey} setHoveredKey={setHoveredKey} hoveredRef={hoveredRef} onNote={onNote} onNoteAudition={audition} auditionEnabled={selectedMeasure==null} onNoteHover={onNoteHover} clock={clock}/>
++     <BeatNoteLayer visible={visible} row={row} axis={axis} tonic={tonic} changes={changes} mutedVoices={mutedVoices} hoveredKey={hoveredKey} setHoveredKey={setHoveredKey} hoveredRef={hoveredRef} onNote={note=>{if(automatic&&editor.chooseNote(note))return;if(onNote)onNote(note);else if(selectedMeasure===null)seek(Math.max(row.start,note.start));}} onNoteAudition={audition} auditionEnabled={selectedMeasure==null} onNoteHover={onNoteHover} clock={clock}/>
+     </div>
+     {renderFooter&&<div className="rawln-footer">{renderFooter(row,{changes,selectedMeasure})}</div>}
+    </div>;
+diff --git a/src/notation/bind-roman-numeral-tooltip.mjs b/src/notation/bind-roman-numeral-tooltip.mjs
+new file mode 100644
+index 0000000..cbaac40
+--- /dev/null
++++ b/src/notation/bind-roman-numeral-tooltip.mjs
+@@ -0,0 +1,88 @@
++// Hover, focus, viewport clamping, and dismissal follow Caplin's
++// reader/dist/score-annotations.js (GPL-3.0-only).
++const active = new WeakMap();
++let nextId = 0;
++
++export function bindRomanNumeralTooltip(anchor, render) {
++  const document = anchor.ownerDocument;
++  const window = document.defaultView;
++  let tooltip = null, timer = 0;
++  const clear = () => window.clearTimeout(timer);
++  const relatedInside = (element, related) => related instanceof window.Node && element?.contains(related);
++  const outside = event => {
++    if (!relatedInside(anchor, event.target) && !relatedInside(tooltip, event.target)) hide();
++  };
++  const scroll = event => { if (!relatedInside(tooltip, event.target)) hide(); };
++  const escape = event => { if (event.key === 'Escape') hide(); };
++  const events = [
++    ['scroll', scroll, true], ['resize', hide], ['blur', hide],
++    ['pointerdown', outside, true], ['keydown', escape],
++  ];
++
++  function hide() {
++    clear();
++    if (!tooltip) return;
++    const revision = (anchor.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(id => id && id !== tooltip.id);
++    if (revision.length) anchor.setAttribute('aria-describedby', revision.join(' '));
++    else anchor.removeAttribute('aria-describedby');
++    tooltip.remove();
++    tooltip = null;
++    for (const [type, listener, capture] of events) window.removeEventListener(type, listener, capture);
++    if (active.get(document) === hide) active.delete(document);
++  }
++
++  function show() {
++    clear();
++    if (tooltip) return;
++    active.get(document)?.();
++    active.set(document, hide);
++    tooltip = document.createElement('div');
++    tooltip.className = 'rawln-rn-tooltip';
++    tooltip.id = 'rawln-rn-tooltip-' + ++nextId;
++    tooltip.setAttribute('role', 'tooltip');
++    tooltip.innerHTML = render();
++    tooltip.addEventListener('pointerenter', clear);
++    tooltip.addEventListener('pointerleave', event => {
++      if (!relatedInside(anchor, event.relatedTarget)) hide();
++    });
++    document.body.append(tooltip);
++    const uses = anchor.getAttribute('aria-describedby');
++    anchor.setAttribute('aria-describedby', uses ? uses + ' ' + tooltip.id : tooltip.id);
++    for (const [type, listener, capture] of events) window.addEventListener(type, listener, capture);
++
++    const box = anchor.getBoundingClientRect(), bounds = tooltip.getBoundingClientRect();
++    const left = Math.min(window.innerWidth - bounds.width - 8, box.left + (box.width - bounds.width) / 2);
++    const top = box.top >= bounds.height + 9 ? box.top - bounds.height - 9
++      : Math.min(window.innerHeight - bounds.height - 8, box.bottom + 9);
++    tooltip.style.left = Math.max(8, left) + 'px';
++    tooltip.style.top = Math.max(8, top) + 'px';
++  }
++
++  const leave = event => {
++    if (event.pointerType === 'touch' || relatedInside(anchor, event.relatedTarget)
++        || relatedInside(tooltip, event.relatedTarget)) return;
++    clear();
++    timer = window.setTimeout(hide, 140);
++  };
++  const stop = event => event.stopPropagation();
++  const click = event => {
++    stop(event);
++    show();
++  };
++  const key = event => {
++    if (event.key === 'Enter') {
++      event.preventDefault();
++      stop(event);
++      show();
++    }
++  };
++  const triggers = [
++    ['pointerover', show], ['pointerout', leave], ['focusin', show], ['focusout', leave],
++    ['pointerdown', stop], ['click', click], ['keydown', key],
++  ];
++  for (const [type, listener] of triggers) anchor.addEventListener(type, listener);
++  return () => {
++    hide();
++    for (const [type, listener] of triggers) anchor.removeEventListener(type, listener);
++  };
++}
+diff --git a/src/notation/geometry.mjs b/src/notation/geometry.mjs
+index 2f98c19..558d4ba 100644
+--- a/src/notation/geometry.mjs
++++ b/src/notation/geometry.mjs
+@@ -5,10 +5,11 @@ export function pitchRange(notes,span=null,fallback={low:48,high:84}){
+  const pitches=notes.filter(n=>!span||Math.min(span.end,n.start+n.duration)-Math.max(span.start,n.start)>1e-6).map(n=>n.pitch);
+  return pitches.length?{low:Math.min(...pitches),high:Math.max(...pitches)}:{...fallback};
+ }
+-export function staveGeometry(range,{above=0,transpose=0}={}){
+- const low=range.low+transpose,high=range.high+transpose,noteTop=TOP_CLEARANCE+above;
+- const noteHeight=(high-low)*PITCH_STEP+TOP_CLEARANCE+NOTE_HEIGHT+BOTTOM_CLEARANCE;
+- return {low,high,noteTop,noteHeight,notesBottom:noteHeight+above,guideTop:Math.max(0,noteTop-16),markerTop:noteTop-14,pitchToY:pitch=>noteTop+(high-pitch)*PITCH_STEP};
++export function staveGeometry(range,{above=0,transpose=0,noteScale=1}={}){
++ const scale=Number.isFinite(noteScale)&&noteScale>0?noteScale:1,pitchStep=PITCH_STEP*scale,glyphHeight=NOTE_HEIGHT*scale;
++ const low=range.low+transpose,high=range.high+transpose,noteTop=TOP_CLEARANCE+above+Math.max(0,glyphHeight-NOTE_HEIGHT);
++ const notesBottom=noteTop+(high-low)*pitchStep+glyphHeight+BOTTOM_CLEARANCE,noteHeight=notesBottom-above;
++ return {low,high,noteTop,noteHeight,notesBottom,pitchStep,glyphHeight,guideTop:Math.max(0,noteTop-16),markerTop:noteTop-14,pitchToY:pitch=>noteTop+(high-pitch)*pitchStep};
+ }
+ export const mod=n=>((n%12)+12)%12;
+ export function tonicAt(tonic,changes,beat){let result=tonic;for(const c of changes){if(c.beat<beat)result=c.tonic;else break;}return result;}
+@@ -27,6 +28,7 @@ export function keyMarkers(tonic,changes){
+  return onsets.map((event,i)=>{const previousTonic=i?onsets[i-1].tonic:null,delta=previousTonic===null?null:mod(event.tonic-previousTonic);return {...event,previousTonic,delta:delta!==null&&delta>6?delta-12:delta};});
+ }
+ /** Copy of AnalysisGrid's Measure/NewTonicSymbol layout in quarter beats.
++ * Section starts use the phrase accent when they coincide with an existing bar.
+  * Terminal phrase boundaries retain their bar without acquiring a number.
+  * Pixel width is needed only for Rawl's 80px carried flag and beat density.
+  */
+@@ -40,11 +42,21 @@ export function measureHeaderLayout({row,tonic=0,changes=[],barBeats=4,beatBeats
+  for(const {beat,number} of grid){
+   if(beat<row.start-EPS||beat>row.end+EPS)continue;
+   barlines.push(beat);
+-  const terminal=Math.abs(beat-row.end)<EPS,isPhraseStart=boundary(beat);
++  const terminal=Math.abs(beat-row.end)<EPS;
++  const isPhraseStart=boundary(beat)||(!terminal&&Math.abs(beat-row.start)<EPS);
+   if(!terminal||isPhraseStart)measures.push({beat,number,left:x(beat),terminal,isPhraseStart,color:selectedMeasure===beat?'red':selectedPhrase&&Math.abs(beat-selectedMeasure)<=4*barBeats+EPS?'orange':'#666'});
+  }
+  if(beatBeats>0){
+-  if(explicit){for(const measure of explicit){const unit=measure.beatBeats??beatBeats;for(let beat=measure.start+unit;beat<measure.start+measure.duration-EPS;beat+=unit)if(beat>=row.start-EPS&&beat<=row.end+EPS)beats.push(beat);}}
++  if(explicit){
++   for(const measure of explicit){
++    if(measure.beatPositions){
++     beats.push(...measure.beatPositions.filter(beat=>beat>=row.start-EPS&&beat<=row.end+EPS));
++     continue;
++    }
++    const unit=measure.beatBeats??beatBeats;
++    for(let beat=measure.start+unit;beat<measure.start+measure.duration-EPS;beat+=unit)if(beat>=row.start-EPS&&beat<=row.end+EPS)beats.push(beat);
++   }
++  }
+   else for(let beat=Math.ceil((row.start-EPS)/beatBeats)*beatBeats;beat<=row.end+EPS;beat+=beatBeats)if(Math.abs(beat/barBeats-Math.round(beat/barBeats))>EPS)beats.push(beat);
+  }
+  const relevant=[...barlines,...beats].filter(beat=>beat!==0).sort((a,b)=>a-b),showBeats=relevant.length>1&&(relevant.at(-1)-relevant[0])*ppb/(relevant.length+1)>=10;
+@@ -69,7 +81,7 @@ export function tonalSegments(tonic,changes,start,end){
+  result.push({start:cursor,end,tonic:current});return result;
+ }
+ export function tonalLines(range,axis,tonic){
+- const result=[];const rawlY=p=>axis.pitchToY(p)+PITCH_STEP;
++ const result=[];const rawlY=p=>axis.pitchToY(p)+axis.pitchStep;
+  for(let octave=Math.ceil((range.low+7-tonic)/12);octave<=Math.floor((range.high+12-tonic)/12);octave++){
+   const midi=tonic+octave*12;
+   if(midi-12>=range.low&&midi-12<=range.high)result.push({kind:'tonic',y:rawlY(midi-13+.5)});
+@@ -84,6 +96,24 @@ export function validateMeasureMap(measures){
+  let cursor=0;for(const measure of measures){
+   if(!Number.isFinite(measure.start)||Math.abs(measure.start-cursor)>1e-7||!Number.isFinite(measure.duration)||measure.duration<=0||!['number','string'].includes(typeof measure.sourceNumber)||measure.beatBeats!==undefined&&(!Number.isFinite(measure.beatBeats)||measure.beatBeats<=0))throw Error('Invalid measure map');
+   cursor=measure.start+measure.duration;
++  if(measure.beatPositions!==undefined){
++   let previous=measure.start;
++   if(!Array.isArray(measure.beatPositions))throw Error('Invalid measure map');
++   for(const beat of measure.beatPositions){
++    if(!Number.isFinite(beat)||beat<=previous||beat>=cursor)throw Error('Invalid measure map');
++    previous=beat;
++   }
++  }
+  }
+  return measures;
+ }
++// Place each row's musical anchor at the same x while keeping the beat scale uniform.
++export function alignScoreRows(rows){
++ const offsets=rows.map(({start,end,anchor=start})=>Math.max(0,Math.min(end,anchor)-start));
++ const pickup=Math.max(0,...offsets);
++ const width=pickup+Math.max(0,...rows.map(({start,end},index)=>end-start-offsets[index]));
++ return {width,rows:rows.map((row,index)=>({
++  ...row,style:{...row.style,width:width?(row.end-row.start)/width*100+'%':'0%',
++   marginLeft:width?(pickup-offsets[index])/width*100+'%':'0%'},
++ }))};
++}
+diff --git a/src/notation/index.d.ts b/src/notation/index.d.ts
+index f89f847..52d2f23 100644
+--- a/src/notation/index.d.ts
++++ b/src/notation/index.d.ts
+@@ -1,16 +1,39 @@
+ import * as React from 'react';
+-export interface MidiNote { id:string; pitch:number; start:number; duration:number; voice:number; velocity?:number; }
++import type { NotePlaybackClock } from './native';
++export interface MidiNote {
++ id:string; pitch:number; start:number; duration:number; voice:number; velocity?:number;
++ /** If set, highlight in playback-clock units while laying out start/duration in beats. */
++ playbackSpan?:readonly [start:number,end:number];
++}
+ export interface ScoreRow { start:number; end:number; label?:number; style?:React.CSSProperties; }
+ export interface TonicChange { beat:number; tonic:number; join?:boolean; name?:string; onsetOverride?:boolean; }
+-export interface SourceMeasure { start:number; duration:number; sourceNumber:number|string; beatBeats?:number; }
++export interface SourceMeasure {
++ start:number; duration:number; sourceNumber:number|string; beatBeats?:number;
++ /** Absolute positions of annotated beats inside the measure, in display units. Overrides beatBeats. */
++ beatPositions?:readonly number[];
++ /** Half-open spans in playback clock units. Omit to follow display beats. */
++ playbackSpans?:readonly (readonly [start:number,end:number])[];
++}
++export interface PlaybackMeasureBordersProps {
++ left?:React.CSSProperties['left']; width?:React.CSSProperties['width'];
++ top?:boolean; bottom?:boolean; hidden?:boolean;
++}
++export const PlaybackMeasureBorders:React.ForwardRefExoticComponent<PlaybackMeasureBordersProps & React.RefAttributes<HTMLDivElement>>;
++/** Tracks the current measure in a host-rendered relative score row. */
++export const PlaybackMeasureLayer:React.FC<{row:ScoreRow;clock:NotePlaybackClock;measureMap?:readonly SourceMeasure[];barBeats?:number}>;
+ export interface RawlNotationHandle { setPosition(beat:number|null):void; element:HTMLDivElement|null; }
+ export interface RawlNotationProps {
+  notes:MidiNote[]; beats:number; rows?:ScoreRow[]; tonic?:number; changes?:TonicChange[];
+  barBeats?:number; beatBeats?:number; phraseStarts?:number[]; measureMap?:SourceMeasure[]; hideInitialTonic?:boolean; position?:number|null; mutedVoices?:number[]; className?:string; style?:React.CSSProperties;
++ /** An externally advanced clock. When position is omitted, its lifecycle belongs to the host. */
++ playbackClock?:NotePlaybackClock & {seek?:(beat:number)=>void};
++ showTonalGuides?:boolean; noteScale?:number;
+  onSeek?:(beat:number)=>void; onNote?:(note:MidiNote)=>void; onNoteAudition?:(note:MidiNote)=>void; onNoteHover?:(note:MidiNote|null)=>void;
+  onMeasureSelect?:(beat:number)=>void; selectedMeasure?:number|null;
+  onChangesChange?:(changes:TonicChange[])=>void; recolorable?:boolean;
+- renderHeader?:(row:ScoreRow)=>React.ReactNode; renderFooter?:(row:ScoreRow,context:{changes:TonicChange[];selectedMeasure:number|null})=>React.ReactNode;
++ renderHeader?:(row:ScoreRow)=>React.ReactNode;
++ renderUnderlay?:(row:ScoreRow,axis:ReturnType<typeof staveGeometry>)=>React.ReactNode;
++ renderFooter?:(row:ScoreRow,context:{changes:TonicChange[];selectedMeasure:number|null})=>React.ReactNode;
+ }
+ export const RawlNotation:React.ForwardRefExoticComponent<RawlNotationProps & React.RefAttributes<RawlNotationHandle>>;
+ export interface RawlMeasureHeaderProps {
+@@ -20,7 +43,7 @@ export interface RawlMeasureHeaderProps {
+ }
+ export const RawlMeasureHeader:React.FC<RawlMeasureHeaderProps>;
+ export function pitchRange(notes:MidiNote[],span?:ScoreRow|null,fallback?:{low:number;high:number}):{low:number;high:number};
+-export function staveGeometry(range:{low:number;high:number},options?:{above?:number;transpose?:number}):{low:number;high:number;noteTop:number;noteHeight:number;notesBottom:number;guideTop:number;markerTop:number;pitchToY:(pitch:number)=>number};
++export function staveGeometry(range:{low:number;high:number},options?:{above?:number;transpose?:number;noteScale?:number}):{low:number;high:number;noteTop:number;noteHeight:number;notesBottom:number;pitchStep:number;glyphHeight:number;guideTop:number;markerTop:number;pitchToY:(pitch:number)=>number};
+ export function modulationLabelOffset(beat:number,barBeats:number,options?:{initial?:boolean;onsetOverride?:boolean;continued?:boolean}):number;
+ export const RAWL_COLORS:ReadonlyArray<{background:string;foreground:string;dot?:{color:string;size:number}}>;
+
+diff --git a/src/notation/roman-numeral-tooltip.mjs b/src/notation/roman-numeral-tooltip.mjs
+new file mode 100644
+index 0000000..7f99b7f
+--- /dev/null
++++ b/src/notation/roman-numeral-tooltip.mjs
+@@ -0,0 +1,224 @@
++// Pitch diagrams and approved explanations adapted from Caplin's
++// reader/dist/{piano-chord-legend,score-annotations}.js (GPL-3.0-only).
++import {RAWL_COLORS, colorIndex} from './palette.mjs';
++import {chordContext, figurePitch, qualityPitch, firstRomanChord, romanNumeralHTML} from './roman-numerals.mjs';
++
++const degreeNames = ['1', '♭2', '2', '♭3', '3', '4', '♯4', '5', '♭6', '6', '♭7', '7'];
++const triadNames = ['трезвучие', 'секстаккорд', 'квартсекстаккорд'];
++const seventhNames = ['септаккорд', 'квинтсекстаккорд', 'терцквартаккорд', 'секундаккорд'];
++const inversionNames = ['основной вид', 'первое обращение', 'второе обращение', 'третье обращение'];
++const englishInversions = ['root position', 'first inversion', 'second inversion', 'third inversion'];
++const escape = text => String(text).replace(/[&<>"']/g, c => ({
++  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
++}[c]));
++
++function stack(pitches) {
++  const ordered = [];
++  for (let pitch of pitches) {
++    while (ordered.length && pitch <= ordered.at(-1)) pitch += 12;
++    ordered.push(pitch);
++  }
++  return ordered;
++}
++
++function explicitModel(tooltip) {
++  const {pitches, rootPitches, rootNotation, inversion} = tooltip;
++  const validPitch = pitch => Number.isInteger(pitch) && Math.abs(pitch) <= 127;
++  if (!pitches?.length || !pitches.every(validPitch)) return null;
++  const root = rootPitches?.length && rootPitches.every(validPitch)
++    ? [...new Set(rootPitches)].sort((a,b) => a-b) : undefined;
++  return {
++    pitches: [...new Set(pitches)].sort((a,b) => a-b),
++    rootPitches: root,
++    rootNotation,
++    inversion,
++    seventh: (root ?? pitches).length === 4,
++  };
++}
++
++export function romanNumeralTooltipModel(notation, options = {}, tooltip = true) {
++  if (tooltip !== true) {
++    return tooltip ? explicitModel(tooltip) : null;
++  }
++  if (options.jazz) return null;
++  const bare = String(notation).replace(/(?:…|\.{3})$/u, '').replace(/[[\]]/g, '');
++  const token = firstRomanChord(bare) ?? (options.contextChord
++    ? options.contextChord.replace(/^[^/]+/, root => root + bare.replace(/[()\s–—-]/g, '')) : null);
++  const context = token && chordContext(token, options);
++  if (!context?.bass) return null;
++
++  let tones = context.tones.map(note => note.pitch), bass = context.bass.pitch;
++  const {first, root, figures} = context;
++  const cadentialSixFour = first.name === 'V' && bass === root && figures.startsWith('64') &&
++    (first.tail.startsWith('(') || options.cadentialSixFour);
++  if (cadentialSixFour) {
++    const third = context.tones.find(note => note.degree === (context.degree + 5) % 7)?.pitch;
++    tones = [colorIndex(root + 5), third ?? colorIndex(root + (options.mode === 'minor' ? 8 : 9)), root];
++  } else if (first.quality === 'ø' && tones.length === 3) {
++    // A lone 6 in the source still describes a half-diminished seventh.
++    tones.push(colorIndex(root + 10));
++  }
++  const offset = options.colorOffset ?? 0;
++  tones = [...new Set(tones.map(pitch => colorIndex(pitch + offset)))];
++  bass = colorIndex(bass + offset);
++  const inversion = tones.indexOf(bass);
++  if (inversion < 0) return null;
++  const special = !!first.named && first.name !== 'N';
++  const seventh = tones.length === 4;
++  const applied = token.includes('/') ? token.slice(token.indexOf('/') + 1) : '';
++  const rootNotation = cadentialSixFour ? applied || (options.mode === 'minor' ? 'i' : 'I')
++    : first.accidental + first.name + first.quality + (seventh ? '⁷' : '') + (applied ? '/' + applied : '');
++  return {
++    pitches: stack([...tones.slice(inversion), ...tones.slice(0, inversion)]),
++    rootPitches: stack(tones),
++    rootNotation,
++    inversion,
++    seventh,
++    special,
++    cadentialSixFour,
++    token,
++  };
++}
++
++// Exact Russian interface copy approved for Caplin on 2026-11-02.
++const explanations = {
++  roman: 'Римская цифра — ступень основного тона аккорда.',
++  case: 'Прописная цифра — мажорное трезвучие; строчная — минорное.',
++  flat: '♭ перед цифрой понижает основной тон на полутон относительно мажорной гаммы тоники.',
++  sharp: '♯ перед цифрой повышает основной тон на полутон относительно мажорной гаммы тоники.',
++  diminishedTriad: 'o — уменьшенное трезвучие.',
++  diminishedSeventh: 'o7 — уменьшенный септаккорд.',
++  halfDiminished: 'ø7 — полууменьшенный септаккорд.',
++  neapolitan: 'неаполитанский аккорд',
++  applied: '/ — аккорд рассчитан относительно ступени справа как временной тоники.',
++  figureParentheses: 'Скобки объединяют фигуры, относящиеся к одной гармонии.',
++  augmentedSixth: '+6 — увеличенная секста; It, Fr, Ger — итальянский, французский и немецкий варианты аккорда.',
++  cadentialSixFour: 'Кадансовый 6/4 — задержания над доминантовым басом с разрешением в 5/3.',
++  // Caplin printed 27 / PDF 50, canonical translation p50-b5.
++  harmonicParentheses: 'Используйте круглые скобки для обозначения гармонического подчинения, особенно внутри органных пунктов и секвенций.',
++};
++const figureIntervals = {
++  6: '6 — секста', 64: '6/4 — секста и кварта', 7: '7 — септима', 65: '6/5 — секста и квинта',
++  43: '4/3 — кварта и терция', 42: '4/2 — кварта и секунда', 2: '2 — секунда', 53: '5/3 — квинта и терция',
++};
++
++function explanationRows(label, model, options) {
++  const rows = new Map();
++  const byText = new Map();
++  const colored = (text, pitch, kind = 'root') => {
++    if (!Number.isFinite(pitch)) return escape(text);
++    const degree = colorIndex(pitch + (options.colorOffset ?? 0));
++    return `<span class="chord-${kind} colored" data-root="${degree}" style="--chord-color:${RAWL_COLORS[degree].background}">${escape(text)}</span>`;
++  };
++  const add = (key, symbol, text = explanations[key]) => {
++    if (!text) return;
++    if (!byText.has(text)) byText.set(text, {key, symbols: new Set()});
++    byText.get(text).symbols.add(symbol);
++  };
++  const describe = (token, displayedLabel, cadentialSixFour) => {
++    const parts = token.split('/');
++    for (const [index, part] of parts.entries()) {
++      const context = chordContext(parts.slice(index).join('/'), {...options, cadentialSixFour});
++      const info = context?.first;
++      if (!info) continue;
++      if (info.named) {
++        if (info.name === 'N') add('neapolitan', colored('N', context.root));
++        else add('augmentedSixth', colored(info.name === 'Gr' ? 'Gr / Ger' : info.name, context.root)
++          + ' ' + colored('+6', figurePitch(6, context), 'figure'));
++      } else {
++        const symbol = colored(info.name, context.root) + ' = ' + colored(info.degree + 1, context.root);
++        add('roman', symbol);
++        if (!info.quality) add('case', symbol);
++      }
++      if (info.accidental) add(info.accidental === '♭' ? 'flat' : 'sharp', colored(info.accidental, context.root));
++      if (info.quality) {
++        const seventh = index === 0 ? model.seventh : /[⁷₅₃₂]/u.test(part);
++        const key = info.quality === 'ø' ? 'halfDiminished' : seventh ? 'diminishedSeventh' : 'diminishedTriad';
++        add(key, colored(info.quality === '°' ? 'o' : 'ø', qualityPitch(context), 'quality'));
++      }
++    }
++    const context = chordContext(token, {...options, cadentialSixFour});
++    const figures = context?.figures;
++    if (figures && (!context.first.named || context.first.name === 'N')) {
++      const text = figures === '6453' ? '6/4–5/3' : figures.replace(/^(65|64|43|42|53)$/u, m => m[0] + '/' + m[1]);
++      const symbol = [...text].map(c => /\d/.test(c) ? colored(c, figurePitch(Number(c), context), 'figure') : escape(c)).join('');
++      if (cadentialSixFour) add('cadentialSixFour', symbol);
++      else if (figureIntervals[figures]) add(`figures${figures}`, symbol,
++        'Цифры справа обозначают интервалы над басом: ' + figureIntervals[figures] + '.');
++    }
++    if (parts.length > 1) add('applied', '/');
++    if (context?.first.tail.includes('(')) add('figureParentheses', '( )');
++    else if (/^\(|\)$/u.test(displayedLabel)) add('harmonicParentheses', '( )');
++  };
++  if (model.inversion && !model.special && model.rootNotation) {
++    describe(model.rootNotation, model.rootNotation, false);
++  }
++  describe(model.token, label, model.cadentialSixFour);
++  for (const [text, {key, symbols}] of byText) {
++    const symbol = [...symbols].join(', ');
++    if (!rows.has(symbol)) rows.set(symbol, []);
++    rows.get(symbol).push(`<span data-symbol="${key}">${escape(text)}</span>`);
++  }
++  return rows.size ? `<dl class="rawln-rn-explanations">${[...rows].map(([symbol, texts]) =>
++    `<div><dt>${symbol}</dt><dd>${texts.join(' ')}</dd></div>`).join('')}</dl>` : '';
++}
++
++function pitchGeometry(columns) {
++  const height = 12, step = 6, pitches = columns.flatMap(column => column.pitches);
++  const low = Math.min(...pitches), high = Math.max(...pitches);
++  const absoluteTop = pitch => -pitch * step;
++  const start = absoluteTop(high), end = absoluteTop(low) + height, guides = [];
++  const firstOctave = Math.floor(low / 12) - 1, lastOctave = Math.ceil(high / 12) + 1;
++  for (let octave = lastOctave; octave >= firstOctave; octave--) {
++    for (const degree of [7, 0]) {
++      const pitch = octave * 12 + degree, y = absoluteTop(pitch) + height;
++      guides.push({pitch, degree, y});
++    }
++  }
++  const before = guides.filter(guide => guide.y + 1 < start).at(-1);
++  const after = guides.find(guide => guide.y > end);
++  const visible = [before, ...guides.filter(guide => guide.y + 1 >= start && guide.y <= end), after].filter(Boolean);
++  const top = Math.min(start, ...visible.map(guide => guide.y)) - 4;
++  const bottom = Math.max(end, ...visible.map(guide => guide.y + 1)) + 4;
++  return {height, gridHeight: bottom - top, y: pitch => absoluteTop(pitch) - top,
++    guides: visible.map(guide => ({...guide, y: guide.y - top}))};
++}
++
++function caption(column, options) {
++  if (column.cadentialSixFour) return ['6/4'];
++  if (column.special) return [options.jazz ? 'augmented sixth' : 'увеличенная секста'];
++  const inversion = column.inversion;
++  if (options.jazz) {
++    const third = column.pitches.length === 3 && !/(?:sus|add|omit|no)/i.test(column.notation);
++    const seventh = column.pitches.length === 4 && /7/.test(column.notation);
++    return [third ? 'triad' : seventh ? 'seventh chord' : '',
++      typeof inversion === 'number' ? englishInversions[inversion] : ''];
++  }
++  return [column.seventh ? seventhNames[inversion] : triadNames[inversion], inversionNames[inversion]];
++}
++
++export function romanNumeralTooltipHTML(notation, options, model) {
++  const columns = [
++    ...(model.inversion && !model.special && model.rootPitches && model.rootNotation
++      ? [{...model, pitches: model.rootPitches, notation: model.rootNotation, inversion: 0, cadentialSixFour: false}] : []),
++    {...model, notation},
++  ];
++  const geometry = pitchGeometry(columns);
++  const guides = geometry.guides.map(({pitch, degree, y}) => `<span class="rawln-rn-tooltip-guide" data-degree="${degree}" data-pitch="${pitch}" style="top:${y}px"></span>`).join('');
++  const diagram = columns.map(column => {
++    const label = romanNumeralHTML(column.notation, {...options, theme: 'dark', colorRoots: true,
++      ...(column.notation !== notation ? {bassPitch: null} : {})});
++    const notes = column.pitches.map(pitch => {
++      const degree = colorIndex(pitch);
++      return `<span class="rawln-rn-tooltip-note" data-degree="${degree}" data-pitch="${pitch}" style="top:${geometry.y(pitch)}px;background:${RAWL_COLORS[degree].background}">${degreeNames[degree]}</span>`;
++    }).join('');
++    const intervals = column.pitches.slice(1).map((pitch, index) => {
++      const previous = column.pitches[index], y = (geometry.y(pitch) + geometry.y(previous) + geometry.height) / 2;
++      return `<span class="rawln-rn-tooltip-interval" data-semitones="${pitch - previous}" style="top:${y}px">+${pitch - previous}</span>`;
++    }).join('');
++    const [kind, inversion] = caption(column, options);
++    return `<section class="rawln-rn-tooltip-column"><div class="rawln-rn-tooltip-label">${label}</div><div class="rawln-rn-tooltip-grid" style="height:${geometry.gridHeight}px">${guides}${notes}${intervals}</div>${kind ? `<div class="rawln-rn-tooltip-kind">${kind}</div>` : ''}${inversion ? `<div class="rawln-rn-tooltip-inversion">${inversion}</div>` : ''}</section>`;
++  }).join('');
++  const copy = !options.jazz && model.token ? explanationRows(notation, model, options) : '';
++  return `<div class="rawln-rn-tooltip-columns">${diagram}</div>${copy}`;
++}
+diff --git a/src/notation/roman-numerals.css b/src/notation/roman-numerals.css
+new file mode 100644
+index 0000000..2ed48a7
+--- /dev/null
++++ b/src/notation/roman-numerals.css
+@@ -0,0 +1,188 @@
++/* Caplin's baseline, figured-bass stacks, and dark score colors. */
++.rawln-roman {
++  display: inline;
++  position: relative;
++  white-space: nowrap;
++  font-family: Georgia, "Times New Roman", serif;
++  font-style: normal;
++  font-weight: 400;
++  line-height: 0;
++  vertical-align: baseline;
++}
++.rawln-roman sup { display: inline-block; position: relative; top: -.5em; vertical-align: baseline; font-size: .64em; line-height: 0; margin-left: .025em; }
++.rawln-roman .figures { display: inline-block; position: relative; vertical-align: baseline; height: 0; width: .58em; font-size: .64em; line-height: 0; margin-left: .04em; text-align: left; }
++.rawln-roman .figures > span { position: absolute; left: 0; line-height: 1; white-space: nowrap; }
++.rawln-roman .figures > span:first-child { top: -1.32em; }
++.rawln-roman .figures > span:nth-of-type(2) { top: -.58em; }
++.rawln-roman .figures.augmented { width: 1.22em; }
++.rawln-roman .figures.quality-figure { width: .66em; }
++.rawln-roman .figures.quality-figure[data-quality="diminished"] { width: .5em; margin-left: 0; }
++.rawln-roman .quality-figure[data-quality="diminished"] + .figures { margin-left: 0; }
++.rawln-roman .figures.quality-figure sup { position: static; font-size: inherit; line-height: inherit; margin: 0; }
++.rawln-roman .chord-root { font-kerning: normal; white-space: nowrap; }
++.rawln-roman .chord-accidental { display: inline-block; margin-left: -.08em; margin-right: -.14em; font-style: normal; }
++.rawln-roman .chord-accidental.sharp { margin-right: -.1em; }
++.rawln-roman[data-roman-font="sans-serif"] { font-family: system-ui, sans-serif; }
++.rawln-roman[data-roman-font="sans-serif"] .chord-root > .chord-accidental:last-child { margin-right: .06em; }
++.rawln-roman .chord-opening-parenthesis { display: inline-block; margin-right: -.075em; }
++.rawln-roman .colored { color: var(--chord-color); paint-order: stroke fill; }
++.rawln-roman .chord-slash { color: #888; }
++.rawln-roman[data-roman-theme="light"] .colored[data-root="0"] { color: #000; }
++.rawln-roman[data-roman-theme="dark"] .colored:is([data-root="1"],[data-root="3"],[data-root="5"],[data-root="8"]) {
++  --rawln-shadow-step: clamp(0px, calc(1px - .045em), .035em);
++  -webkit-text-stroke: clamp(0px, calc(1.8px - .075em), .075em) var(--chord-color);
++  text-shadow:
++    calc(-1 * var(--rawln-shadow-step)) 0 0 var(--chord-color),
++    var(--rawln-shadow-step) 0 0 var(--chord-color),
++    0 calc(-1 * var(--rawln-shadow-step)) 0 var(--chord-color),
++    0 var(--rawln-shadow-step) 0 var(--chord-color),
++    0 0 min(.075em, 1px) var(--chord-color);
++}
++.rawln-roman[data-roman-theme="dark"] .chord-root.colored[data-root="5"] { -webkit-text-stroke: 0; text-shadow: 0 0 min(.12em, 1.25px) var(--chord-color); }
++
++/* Caplin's chord diagram, scoped to the optional shared RN tooltip. */
++.rawln-roman[data-rn-tooltip] {
++  cursor: pointer;
++  pointer-events: auto;
++}
++
++.rawln-roman[data-rn-tooltip]:focus-visible {
++  outline: 1px solid currentColor;
++  outline-offset: 3px;
++  border-radius: 1px;
++}
++
++.rawln-rn-tooltip {
++  position: fixed;
++  z-index: 10000;
++  box-sizing: border-box;
++  width: max-content;
++  max-width: calc(100vw - 16px);
++  max-height: calc(100dvh - 16px);
++  padding: 14px;
++  overflow: auto;
++  overscroll-behavior: contain;
++  pointer-events: auto;
++  background: #000;
++  color: #eee;
++  border: 1px solid #666;
++  border-radius: 5px;
++  box-shadow: 0 4px 16px #0006;
++  font: 13px/1.3 Arial, sans-serif;
++}
++
++.rawln-rn-tooltip-columns {
++  display: flex;
++  justify-content: center;
++  align-items: start;
++  gap: 22px;
++  text-indent: 0;
++}
++
++.rawln-rn-tooltip-column {
++  min-width: 0;
++  text-align: center;
++}
++
++.rawln-rn-tooltip-label {
++  min-height: 40px;
++  padding: 5px 0 4px;
++  color: #fff;
++  font: 28px/1.1 Georgia, 'Times New Roman', serif;
++  white-space: nowrap;
++}
++
++.rawln-rn-tooltip-grid {
++  position: relative;
++  width: 116px;
++  margin: 0 auto 10px;
++}
++
++.rawln-rn-tooltip-guide {
++  position: absolute;
++  left: 0;
++  right: 0;
++  height: 1px;
++  pointer-events: none;
++  background: #fff;
++}
++
++.rawln-rn-tooltip-guide[data-degree="7"] {
++  background: #787878;
++}
++
++.rawln-rn-tooltip-note {
++  position: absolute;
++  left: 12px;
++  width: 60px;
++  height: 12px;
++  border-radius: 6px;
++  color: #000;
++  font: 11px/12px Arial, sans-serif;
++  text-align: center;
++}
++
++.rawln-rn-tooltip-note:is([data-degree="1"], [data-degree="3"], [data-degree="5"], [data-degree="8"]) {
++  color: #fff;
++}
++
++.rawln-rn-tooltip-interval {
++  position: absolute;
++  left: 72px;
++  transform: translateY(-50%);
++  padding: 0 2px;
++  background: #000;
++  color: #ddd;
++  font: 12px/1 Arial, sans-serif;
++}
++
++.rawln-rn-tooltip-kind { font-size: 14px; }
++.rawln-rn-tooltip-inversion { margin-top: 3px; color: #bbb; }
++
++.rawln-rn-tooltip:has(.rawln-rn-explanations) { width: 360px; }
++
++.rawln-rn-explanations {
++  margin: 14px 0 0;
++  padding: 10px 0 0;
++  border-top: 1px solid #333;
++  text-align: left;
++  font: 12px/1.4 Arial, sans-serif;
++}
++
++.rawln-rn-explanations > div {
++  display: grid;
++  grid-template-columns: 48px minmax(0, 1fr);
++  gap: 8px;
++  margin-bottom: 8px;
++}
++
++.rawln-rn-explanations > div:last-child { margin-bottom: 0; }
++
++.rawln-rn-explanations dt {
++  margin: 0;
++  color: #fff;
++  font: 16px/1.2 Georgia, 'Times New Roman', serif;
++  overflow-wrap: anywhere;
++}
++
++.rawln-rn-explanations dd { margin: 0; color: #ddd; text-indent: 0; }
++.rawln-rn-explanations .colored { color: var(--chord-color); }
++
++.rawln-rn-explanations .colored:is([data-root="1"], [data-root="3"], [data-root="5"], [data-root="8"]) {
++  paint-order: stroke fill;
++  -webkit-text-stroke: .075em var(--chord-color);
++  text-shadow: 0 0 .075em var(--chord-color);
++}
++
++.rawln-rn-explanations .chord-root.colored[data-root="5"] {
++  -webkit-text-stroke: 0;
++  text-shadow: 0 0 .12em var(--chord-color);
++}
++
++@media (max-width: 360px) {
++  .rawln-rn-tooltip { padding: 12px 10px; }
++  .rawln-rn-tooltip-columns { gap: 10px; }
++  .rawln-rn-tooltip-grid { width: 106px; }
++  .rawln-rn-tooltip-kind { font-size: 12px; }
++  .rawln-rn-tooltip-inversion { font-size: 11px; }
++}
+diff --git a/src/notation/roman-numerals.mjs b/src/notation/roman-numerals.mjs
+new file mode 100644
+index 0000000..54fb826
+--- /dev/null
++++ b/src/notation/roman-numerals.mjs
+@@ -0,0 +1,198 @@
++// Caplin packages/music/harmonic-notation.js, source commit 444e2f4.
++// The notation, local-key pitch context, and figured-bass colors are shared here.
++import {RAWL_COLORS} from './palette.mjs';
++
++const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
++const supers='⁰¹²³⁴⁵⁶⁷⁸⁹',subs='₀₁₂₃₄₅₆₇₈₉';
++const roots={I:0,II:2,III:4,IV:5,V:7,VI:9,VII:11};
++const palette=RAWL_COLORS.map(color=>color.background);
++const atom='(?:[♭♯]?[IViv]+[°ø]?|It|Fr|Ger|Gr|N)[⁺⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]*(?:\\([⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉–—\\s-]+\\))?';
++const chordPattern=new RegExp('(?<![\\p{L}\\p{N}])('+atom+'(?:/'+atom+')*)(?![\\p{L}\\p{N}])','gu');
++const mod=(value,n=12)=>(value%n+n)%n;
++const numeralIndex={I:0,II:1,III:2,IV:3,V:4,VI:5,VII:6};
++const special={It:{root:8,degree:5,tones:[[5,8],[0,0],[3,6]]},Fr:{root:8,degree:5,tones:[[5,8],[0,0],[1,2],[3,6]]},Ger:{root:8,degree:5,tones:[[5,8],[0,0],[2,3],[3,6]]},Gr:{root:8,degree:5,tones:[[5,8],[0,0],[2,3],[3,6]]},N:{root:1,degree:1,tones:[[1,1],[3,5],[5,8]]}};
++function partInfo(part){
++ const m=part.match(/^([♭♯]?)(It|Fr|Ger|Gr|N|[IViv]+)([°ø]?)(.*)$/);if(!m||!/^[⁺⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉()–—\s-]*$/u.test(m[4]))return null;
++ const named=special[m[2]],degree=named?.degree??numeralIndex[m[2].toUpperCase()];if(degree===undefined)return null;
++ return{accidental:m[1],name:m[2],quality:m[3],tail:m[4],degree,root:named?.root??mod(roots[m[2].toUpperCase()]+(m[1]==='♭'?-1:m[1]==='♯'?1:0)),named};
++}
++function rootOf(chord){
++ const parts=chord.split('/').map(partInfo);return parts.every(Boolean)?mod(parts.reduce((root,part)=>root+part.root,0)):null;
++}
++function chordContext(chord,options={}){
++ const parts=chord.split('/').map(partInfo);if(!parts.every(Boolean))return null;
++ const first=parts[0],target=parts.slice(1).reduce((a,p)=>({root:mod(a.root+p.root),degree:mod(a.degree+p.degree,7)}),{root:0,degree:0});
++ const targetPart=parts[1],localMode=targetPart?(targetPart.quality?null:targetPart.name===targetPart.name.toLowerCase()?'minor':targetPart.named&&targetPart.name!=='N'?null:'major'):options.mode;
++ const root=mod(first.root+target.root),degree=mod(first.degree+target.degree,7),figures=first.tail.replace(/[⁺()–—-]/g,'').split('').map(c=>supers.includes(c)?supers.indexOf(c):subs.indexOf(c)).filter(n=>n>=0).join('');
++ let tones,bass;
++ if(first.named){tones=first.named.tones.map(([d,p])=>({degree:mod(d+target.degree,7),pitch:mod(p+target.root)}));bass=tones[0];}
++ else{
++  const minor=first.name===first.name.toLowerCase(),third=first.quality?3:minor?3:4,fifth=first.quality?6:7;
++  tones=[{degree,pitch:root},{degree:mod(degree+2,7),pitch:mod(root+third)},{degree:mod(degree+4,7),pitch:mod(root+fifth)}];
++  const seventh=[9,10,11].includes(options.seventhInterval)?options.seventhInterval:first.quality==='°'?9:first.quality==='ø'||minor||first.name==='V'?10:(localMode==='major'&&['I','IV'].includes(first.name)||localMode==='minor'&&['♭III','♭VI'].includes(first.accidental+first.name))?11:null;
++  if(/^(?:7|65|43|42|2)/.test(figures)&&seventh!==null)tones.push({degree:mod(degree+6,7),pitch:mod(root+seventh)});
++  const inversion=/^65/.test(figures)?1:/^43/.test(figures)?2:/^(42|2)/.test(figures)?3:/^64/.test(figures)?2:/^6/.test(figures)?1:0;
++  bass=tones[inversion];
++  // Parenthesized 6/4–5/3 embellishments keep the dominant bass. Their
++  // sixth depends on the local tonic mode, so omit that color if unknown.
++  if(first.tail.startsWith('(')||options.cadentialSixFour===true&&/^64/.test(figures)&&first.name==='V'){
++   bass=tones[0];
++   if(first.name==='V'){
++    tones.push({degree:mod(degree+3,7),pitch:mod(root+5)});
++    if(localMode==='major'||localMode==='minor')tones.push({degree:mod(degree+5,7),pitch:mod(root+(localMode==='minor'?8:9))});
++   }
++  }
++ }
++ if(first.name==='N'&&/^6/.test(figures))bass=tones[1];
++ const seventh=tones.find(t=>t.degree===mod(degree+6,7))??null;
++ const stackedSeventh=/^(65|43|42)$/.test(figures)&&!first.named&&!first.tail.startsWith('(');
++ return{root,degree,tones,bass,first,figures,seventh,stackedSeventh};
++}
++function figurePitch(number,context){
++ if(!context?.bass||number<1||number>9)return null;
++ // Two-index seventh inversions use semantic voices rather than literal
++ // interval colors: lower=bass; upper=seventh, except 4/2 upper=third.
++ if(context.stackedSeventh){
++  if(number===Number(context.figures[1]))return context.bass.pitch;
++  if(number===Number(context.figures[0]))return context.figures==='42'?context.tones.find(t=>t.degree===mod(context.degree+2,7))?.pitch??null:context.seventh?.pitch??null;
++ }
++ // In6/4 the sixth names the third of the sounding triad; the lower4
++ // names its bass. In dominant-bass V(6/4), color4 as the local tonic.
++ // Keep the actual dominant bass for interval and resolution calculations.
++ if(number===4&&context.figures.startsWith('64'))return context.first.name==='V'&&context.bass.pitch===context.root?mod(context.root+5):context.bass.pitch;
++ // User convention: the lone inversion6 names the bass color. The +6 in a
++ // national augmented-sixth label remains the actual raised interval.
++ if(number===6&&context.first.tail==='⁶'&&(!context.first.named||context.first.name==='N'))return context.bass.pitch;
++ const degree=mod(context.bass.degree+number-1,7),tones=context.tones.filter(t=>t.degree===degree);
++ return tones.length===1?tones[0].pitch:null;
++}
++function qualityPitch(context){
++ if(!context||!context.first.quality)return null;
++ const represented=new Set([context.root,context.bass?.pitch,context.seventh?.pitch]);
++ const remaining=context.tones.filter(t=>!represented.has(t.pitch));
++ // In4/2 the upper4 already colors the third, leaving the diminished
++ // fifth for the quality mark. Other inversions use the unrepresented tone.
++ return (remaining.find(t=>t.degree===mod(context.degree+4,7))??remaining[0])?.pitch??null;
++}
++const colorStyle=pitch=>`data-root="${pitch}" style="--chord-color:${palette[pitch]}"`;
++const displayPitch=(pitch,options)=>pitch===null||pitch===undefined?null:mod(pitch+(options.colorOffset||0));
++function figureDigits(text,context,options){return [...text].map(c=>{const n=supers.includes(c)?supers.indexOf(c):subs.indexOf(c),pitch=displayPitch(figurePitch(n,context),options);return options.colorFigures&&pitch!==null?`<span class="chord-figure colored" data-figure="${n}" ${colorStyle(pitch)}>${n}</span>`:String(n);}).join('');}
++function figuresMarkup(top,bottom,context,options,augmented=false){
++ const pitch=augmented?displayPitch(figurePitch(supers.indexOf(top[0]),context),options):null;
++ const prefix=augmented?options.colorFigures&&pitch!==null?`<span class="chord-figure colored" data-figure-sign="+" ${colorStyle(pitch)}>+</span>`:'<span class="chord-figure" data-figure-sign="+">+</span>':'';
++ return `<span class="figures${augmented?' augmented':''}"><span>${prefix}${figureDigits(top,context,options)}</span><span${bottom?'':' aria-hidden="true"'}>${figureDigits(bottom,context,options)}</span></span>`;
++}
++function typography(text,context=null,options={}){
++ let result='';
++ for(let i=0;i<text.length;){
++  const char=text[i];
++  if(supers.includes(char)){
++   let top='',bottom='';
++   while(i<text.length&&supers.includes(text[i]))top+=text[i++];
++   while(i<text.length&&subs.includes(text[i]))bottom+=text[i++];
++   // Only musical figures share this two-row geometry. Ordinary superscript
++   // references in prose must remain sup elements for the footnote binder.
++   result+=context||bottom||options.figuredBass?figuresMarkup(top,bottom,context,options):`<sup>${figureDigits(top,context,options)}</sup>`;
++  }else if('°ø'.includes(char)){const pitch=displayPitch(qualityPitch(context),options),quality=options.colorQuality&&pitch!==null?`<sup class="chord-quality colored" ${colorStyle(pitch)}>${char==='°'?'o':char}</sup>`:`<sup class="chord-quality">${char==='°'?'o':char}</sup>`;result+=`<span class="figures quality-figure" data-quality="${char==='°'?'diminished':'half-diminished'}"><span>${quality}</span><span aria-hidden="true"></span></span>`;i++;}
++  else if(char==='⁺'){
++   i++;
++   if(supers.includes(text[i])&&(context||options.figuredBass)){
++    let top='',bottom='';while(i<text.length&&supers.includes(text[i]))top+=text[i++];while(i<text.length&&subs.includes(text[i]))bottom+=text[i++];
++    result+=figuresMarkup(top,bottom,context,options,true);
++   }else result+='<sup>+</sup>';
++  }
++  else {result+=escape(char);i++;}
++ }
++ return result;
++}
++function beforeChord(text,chord){
++ const opening=text.match(/\($/);
++ return opening&&/^[♭♯]/.test(chord)?typography(text.slice(0,opening.index))+'<span class="chord-opening-parenthesis">(</span>':typography(text);
++}
++function markup(text,options={}){
++ const {colorRoots=false}=options;options={...options,figuredBass:options.figuredBass??true,colorFigures:options.colorFigures??colorRoots,colorQuality:options.colorQuality??colorRoots};
++ // A source nonfunctional-quality label can still have an audited sounding
++ // root. Preserve Caplin's m7 spelling rather than inventing a Roman function.
++ const qualityOnly=String(text).match(/^(\()?([m°ø])(⁷)(\))?$/u);
++ if(qualityOnly&&colorRoots&&Number.isInteger(options.rootPitch)){
++  const pitch=mod(options.rootPitch),quality=qualityOnly[2],seventh=mod(pitch+(quality==='°'?9:10));
++  const context={bass:{degree:0,pitch},tones:[{degree:6,pitch:seventh}],first:{tail:'⁷'}};
++  const label=quality==='m'?`<span class="chord-root colored" ${colorStyle(pitch)}>m</span>`:`<span class="figures quality-figure" data-quality="${quality==='°'?'diminished':'half-diminished'}"><span><sup class="chord-quality colored" ${colorStyle(mod(pitch+6))}>${quality==='°'?'o':quality}</sup></span><span aria-hidden="true"></span></span>`;
++  return (qualityOnly[1]?'(':'')+label+typography(qualityOnly[3],context,{...options,colorOffset:0})+(qualityOnly[4]?')':'');
++ }
++ const inheritedParts=options.contextChord?.split('/');if(inheritedParts)inheritedParts[0]+=String(text).replace(/[()\s–—-]/g,'');
++ const inherited=inheritedParts?chordContext(inheritedParts.join('/'),options):null;
++ let result='',last=0;
++ for(const match of text.matchAll(chordPattern)){
++  result+=beforeChord(text.slice(last,match.index),match[0]);
++  const parts=match[0].split('/');
++  result+=(options.hideAppliedTarget?parts.slice(0,1):parts).map((part,index)=>{
++   const info=partInfo(part),context=chordContext(parts.slice(index).join('/'),options),root=displayPitch(context?.root,options);
++   if(!info||root===null||root===undefined)return typography(part);
++   const accidental=info.accidental?`<span class="chord-accidental${info.accidental==='♯'?' sharp':''}">${info.accidental}</span>`:'';
++   return `<span class="chord-root${colorRoots?' colored':''}" data-root="${root}"${colorRoots?` style="--chord-color:${palette[root]}"`:''}>${accidental}${info.name}</span>${typography(info.quality+info.tail,context,options)}`;
++  }).join('/');last=match.index+match[0].length;
++ }
++ return result+typography(text.slice(last),inherited,options);
++}
++
++const jazzNumeral = /^([b#♭♯]*)(VII|III|VI|IV|II|V|I|vii|iii|vi|iv|ii|v|i)(.*)$/u;
++const jazzFigures = /([b#♭♯]*)(13|11|[1-9])|(?:maj|sus|add|alt|no|omit|aug)|[^]/gu;
++const jazzIntervals = {1:0,2:2,4:5,6:9,8:12,9:14,11:17,13:21};
++const prettyAccidental = text => text.replaceAll('b','♭').replaceAll('#','♯');
++
++function jazzMarkup(notation, options) {
++  const hasBass = options.bassPitch !== undefined && options.bassPitch !== null;
++  const slash = hasBass ? notation.lastIndexOf('/') : -1;
++  const symbol = slash < 0 ? notation : notation.slice(0, slash);
++  const match = jazzNumeral.exec(symbol);
++  if (!match) return escape(notation);
++  const [, accidentals, written, tail] = match;
++  const alteration = signs => [...signs].reduce((pitch, sign) => pitch + ('b♭'.includes(sign) ? -1 : 1), 0);
++  const computedRoot = mod(roots[written.toUpperCase()] + alteration(accidentals));
++  const root = options.rootPitch ?? computedRoot;
++  const halfDim = tail.startsWith('ø') || /^m7b5/.test(tail);
++  const dim = /^(?:°|o|dim)/.test(tail);
++  const explicitMinor = /^(?:m(?!aj)|-)/.test(tail);
++  const minor = explicitMinor || written === written.toLowerCase();
++  const name = minor || dim || halfDim ? written.toLowerCase() : written;
++  const accidental = [...prettyAccidental(accidentals)].map(sign =>
++    `<span class="chord-accidental${sign==='♯'?' sharp':''}">${sign}</span>`).join('');
++  const quality = halfDim ? 'ø' : dim ? '°' : '';
++  const suffix = tail.replace(/^m7b5/, '7').replace(/^(?:ø|°|o|dim|m(?!aj)|-)/,'').replace(/^(?:maj|M(?=\d))/,'Δ');
++  const qualityContext = quality ? chordContext(name + quality + '⁷', {seventhInterval:dim?9:10}) : null;
++  const qualityMarkup = qualityContext ? typography(quality, qualityContext, {
++    colorQuality:options.colorQuality??options.colorRoots, colorOffset:mod(root-roots[name.toUpperCase()]),
++  }) : '';
++  const color = options.colorRoots ? ` colored" ${colorStyle(mod(root))}` : '"';
++  const rootMarkup = `<span class="chord-root${color}>${accidental}${name}</span>`;
++  const figures = [...suffix.matchAll(jazzFigures)].map(([token, signs, digits]) => {
++    if (!digits) return escape(prettyAccidental(token));
++    const n = Number(digits);
++    const interval = n===7 ? (dim?9:suffix.includes('Δ')?11:10)
++      : n===3 ? (minor?3:4)
++      : n===5 ? (quality?6:/^(?:\+|aug)/.test(suffix)?8:7)
++      : jazzIntervals[n];
++    const label = prettyAccidental(signs) + digits;
++    const pitch = options.figurePitches?.[label] ?? (interval===undefined?null:mod(root+interval+alteration(signs)));
++    return (options.colorFigures??options.colorRoots)&&pitch!==null
++      ? `<span class="chord-figure colored" data-figure="${digits}" ${colorStyle(mod(pitch))}>${escape(label)}</span>`
++      : escape(label);
++  }).join('');
++  const bass = slash < 0 ? '' : `<span class="chord-slash">/</span><span class="chord-bass${options.colorRoots?' colored':''}" ${colorStyle(mod(options.bassPitch))}>${escape(prettyAccidental(notation.slice(slash+1)))}</span>`;
++  return `${rootMarkup}${qualityMarkup}${figures?`<sup class="roman-jazz-figures">${figures}</sup>`:''}${bass}`;
++}
++
++export function romanNumeralContent(notation, options = {}) {
++  const settings = {colorRoots:true, ...options};
++  return settings.jazz ? jazzMarkup(String(notation),settings) : markup(String(notation),settings);
++}
++
++// The workbench uses this same escaped markup in both React and static DOM views.
++export function romanNumeralHTML(notation, options = {}) {
++  return `<span class="rawln-roman" data-roman-theme="${options.theme==='light'?'light':'dark'}"${options.font==='sans-serif'?' data-roman-font="sans-serif"':''}>${romanNumeralContent(notation,options)}</span>`;
++}
++
++// Share the parsed pitch context with the tooltip renderer.
++export {chordContext, figurePitch, qualityPitch};
++export const firstRomanChord = notation => String(notation).matchAll(chordPattern).next().value?.[0];
+diff --git a/src/notation/style.css b/src/notation/style.css
+index 544a47f..45851a7 100644
+--- a/src/notation/style.css
++++ b/src/notation/style.css
+@@ -1,4 +1,5 @@
+-.rawln{width:100%;min-width:0;color:#aaa;font:11px/1.3 sans-serif}.rawln-row{margin:0 0 10px;min-width:0}.rawln-score{position:relative;background:#000;cursor:crosshair;min-width:0;isolation:isolate}.rawln-grid{position:absolute;inset:0;pointer-events:none;z-index:0}.rawln-tonic-line{position:absolute;height:1.5px;background:linear-gradient(to top,#333,transparent)}.rawln-fifth-line{position:absolute;height:0;border-bottom:.5px dashed #333}.rawln-measure-grid{position:absolute;top:0;left:0;right:0;pointer-events:none;font-family:Lato,sans-serif;font-size:14px;font-weight:400;line-height:normal}.rawln-bar{position:absolute;top:0;width:1px;height:100%;background:#444;z-index:1;pointer-events:none}.rawln-phrase-bar{background:#bbb}.rawln-beat-bar{position:absolute;top:0;width:1px;height:100%;border-left:.5px dashed #333;z-index:2;pointer-events:none}.rawln-measure-labels{position:absolute;inset:0 0 auto;height:16px;pointer-events:none;z-index:auto}.rawln-measure-number{position:absolute;top:-4px;color:#666;z-index:15;user-select:none;white-space:nowrap}.rawln-measure-number>span{font-size:12px;font-family:sans-serif;line-height:normal}.rawln-note{position:absolute;box-sizing:border-box;border:0;padding:0;min-width:1px;min-height:0;line-height:0;cursor:pointer;overflow:visible;outline:none;box-shadow:0 0 0px .5px black}.rawln-note i{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none}.rawln-voice-0{border-radius:6px}.rawln-voice-1{border-radius:6px 0 6px 0}.rawln [hidden]{display:none!important}.rawln-header{position:relative;min-height:23px}.rawln-footer{position:relative;min-height:20px}.rawln a{color:#888;text-decoration:none}.rawln a:hover{color:white;text-decoration:underline}.rawln-annotation{position:absolute;top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:6px;font:10px/1.4 sans-serif}
++:root{--rawln-section-gap:25px}
++.rawln{width:100%;min-width:0;color:#aaa;font:11px/1.3 sans-serif}.rawln-row{margin:0;min-width:0}.rawln-row+.rawln-row{margin-top:var(--rawln-section-gap)}.rawln-score{position:relative;background:#000;min-width:0;isolation:isolate}.rawln-grid{position:absolute;inset:0;pointer-events:none;z-index:0}.rawln-tonic-line{position:absolute;height:1.5px;background:linear-gradient(to top,#333,transparent)}.rawln-fifth-line{position:absolute;height:0;border-bottom:.5px dashed #333}.rawln-measure-grid{position:absolute;top:0;left:0;right:0;pointer-events:none;font-family:Lato,sans-serif;font-size:14px;font-weight:400;line-height:normal}.rawln-bar{position:absolute;top:0;width:1px;height:100%;background:#525252;z-index:1;pointer-events:none}.rawln-phrase-bar{background:#e0e0e0}.rawln-beat-bar{position:absolute;top:0;width:1px;height:100%;border-left:.5px dashed #4d4d4d;z-index:2;pointer-events:none}.rawln-measure-labels{position:absolute;inset:0 0 auto;height:16px;pointer-events:none;z-index:auto}.rawln-measure-position{position:absolute;inset:0;display:grid;align-items:start}.rawln-measure-number{position:relative;grid-column:2;top:-4px;color:#666;z-index:15;user-select:none;white-space:nowrap}.rawln-measure-number>span{font-size:12px;font-family:sans-serif;line-height:normal}.rawln-note{position:absolute;box-sizing:border-box;border:0;padding:0;min-width:1px;min-height:0;line-height:0;cursor:pointer;overflow:visible;outline:none;box-shadow:0 0 0px .5px black}.rawln-note i{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none}.rawln-voice-0{border-radius:6px}.rawln-voice-1{border-radius:6px 0 6px 0}.rawln [hidden]{display:none!important}.rawln-header{position:relative;min-height:23px}.rawln-footer{position:relative;min-height:20px}.rawln a{color:#888;text-decoration:none}.rawln a:hover{color:white;text-decoration:underline}.rawln-annotation{position:absolute;top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:6px;font:10px/1.4 sans-serif}
+ /* Rawl AnalysisGrid.NewTonicSymbol: onset-anchored 80 × 12 fading flag. */
+ .rawln-modulations{position:absolute;inset:0 0 auto;height:16px;overflow:visible;pointer-events:none;z-index:auto}
+ .rawln-modulation{position:absolute;top:0;width:0;user-select:none;pointer-events:none;z-index:auto}
+@@ -6,3 +7,5 @@
+ .rawln-modulation-label{position:absolute;top:-2px;font-size:12px;font-weight:700;line-height:normal;color:white;text-align:left;white-space:nowrap;z-index:100;user-select:none;pointer-events:none}
+ .rawln-modulation-label svg{width:12px;height:12px;vertical-align:-2px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+
++
++.rawln-score[data-seekable]{cursor:pointer}
+diff --git a/tests/measure-map.test.mjs b/tests/measure-map.test.mjs
+index a270944..d588f1f 100644
+--- a/tests/measure-map.test.mjs
++++ b/tests/measure-map.test.mjs
+@@ -33,3 +33,30 @@ test('authored cut/common meter changes retain exact boundaries and per-measure
+  assert.deepEqual(grid.measures.map(m=>[m.beat,m.number]),[[0,1],[4,2],[8,3]]);assert.deepEqual(grid.beats,[2,5,6,7,9,10]);
+  for(const beatBeats of [0,-1,NaN,Infinity])assert.throws(()=>validateMeasureMap([{start:0,duration:4,sourceNumber:1,beatBeats}]),/Invalid measure map/);
+ });
++
++test('recording-time grid keeps irregular beats and measures at their annotated positions',()=>{
++ const measureMap=[
++  {start:0,duration:1.2,sourceNumber:1,beatPositions:[0.2,0.55,0.86]},
++  {start:1.2,duration:0.8,sourceNumber:2,beatPositions:[1.42,1.7,1.84]},
++  {start:2,duration:0.4,sourceNumber:3,beatPositions:[]},
++ ];
++ const grid=measureHeaderLayout({row:{start:0.4,end:2.4},measureMap,width:600,phraseStarts:[]});
++ assert.deepEqual(grid.measures.map(m=>[m.beat,m.number]),[[1.2,2],[2,3]]);
++ assert.deepEqual(grid.beats,[0.55,0.86,1.42,1.7,1.84]);
++ for(const beatPositions of [[1.2],[2],[1.7,1.42],[1.42,1.42],[NaN]]){
++  assert.throws(()=>validateMeasureMap([measureMap[0],{...measureMap[1],beatPositions}]),/Invalid measure map/);
++ }
++});
++
++
++test('a section-start bar uses the phrase accent without changing the authored selection rules', () => {
++ const props={row:{start:5,end:12},measureMap:pickup,width:700,phraseStarts:[9,12],selectedMeasure:5};
++ const {measures}=measureHeaderLayout(props);
++ assert.deepEqual(measures.map(({beat,number,isPhraseStart,color})=>[beat,number,isPhraseStart,color]),[
++  [5,'2',true,'red'],[9,'3',true,'#666'],[12,null,true,'#666'],
++ ]);
++ const clipped=measureHeaderLayout({...props,row:{start:5.5,end:12}});
++ assert.deepEqual(clipped.measures.map(({beat})=>beat),[9,12]);
++ const regular=measureHeaderLayout({row:{start:4,end:12},width:800});
++ assert.deepEqual(regular.measures.map(({beat,isPhraseStart})=>[beat,isPhraseStart]),[[4,true],[8,false]]);
++});
+diff --git a/tests/piano-legend.test.mjs b/tests/piano-legend.test.mjs
+new file mode 100644
+index 0000000..43da8f8
+--- /dev/null
++++ b/tests/piano-legend.test.mjs
+@@ -0,0 +1,55 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { JSDOM } from 'jsdom';
++import { createElement } from 'react';
++import { renderToStaticMarkup } from 'react-dom/server';
++import { FoldablePianoLegend, PianoLegend } from 'librawl/components';
++
++const modes = [{ title: 'major', chords: [
++  { name: 'bII', pitches: [1, 5, 8] },
++  { name: 'V/V', pitches: [2, 6, 9] },
++] }];
++
++function render(Component, props) {
++  return new JSDOM(renderToStaticMarkup(createElement(Component, props))).window.document.body;
++}
++
++function dots(root) {
++  return Array.from(root.querySelectorAll('.rawln-piano-pitch-dot'), dot => ({
++    color: dot.style.background,
++    size: [dot.style.width, dot.style.height],
++    hidden: dot.getAttribute('aria-hidden'),
++  }));
++}
++
++const expected = [
++  { color: 'white', size: ['1px', '1px'], hidden: 'true' },
++  { color: 'black', size: ['2px', '2px'], hidden: 'true' },
++];
++
++test('piano pitch dots match the original marks in both sizes and after transposing', () => {
++  for (const inline of [false, true]) {
++    const keys = render(PianoLegend, { inline, currentTonic: 7 });
++    assert.deepEqual(dots(keys), expected);
++    assert.equal(keys.querySelectorAll('.rawln-piano-key').length, 12);
++    if (!inline) {
++      const labels = [...keys.querySelectorAll('.rawln-piano-key:has(> .rawln-piano-pitch-dot)')]
++        .map(key => key.textContent);
++      assert.deepEqual(labels, ['♭2', '♯4']);
++    }
++  }
++});
++
++test('chord stairs retain both relative pitch dots', t => {
++  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
++  Object.defineProperty(globalThis, 'localStorage', { value: { getItem: () => 'true' }, configurable: true });
++  t.after(() => {
++    if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage);
++    else delete globalThis.localStorage;
++  });
++  const legend = render(FoldablePianoLegend, { modes, currentTonic: 7 });
++  const chordNotes = legend.querySelector('.rawln-piano-chords');
++  assert.equal(chordNotes.querySelectorAll('.rawln-piano-chord > i').length, 6);
++  assert.deepEqual(dots(chordNotes), expected);
++  assert.equal(legend.querySelector('.rawln-piano-legend').dataset.expanded, 'true');
++});
+diff --git a/tests/playback-footer.test.mjs b/tests/playback-footer.test.mjs
+new file mode 100644
+index 0000000..2efa2af
+--- /dev/null
++++ b/tests/playback-footer.test.mjs
+@@ -0,0 +1,109 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import React from 'react';
++import {flushSync} from 'react-dom';
++import {createRoot} from 'react-dom/client';
++import {JSDOM} from 'jsdom';
++import {PlaybackFooter} from 'librawl/components';
++
++test('PlaybackFooter keeps musical marks and delegates transport controls to its host', async () => {
++  const {window} = new JSDOM('<div id="root"></div>');
++  globalThis.window = window;
++  globalThis.document = window.document;
++  const element = document.getElementById('root');
++  const root = createRoot(element);
++  let toggles = 0;
++  const rates = [];
++  const volumes = [];
++  const props = {
++    position: 59.99, duration: 100, playing: false,
++    onTogglePlay: () => toggles++, onSeek: () => {},
++    rate: 1, onRateChange: rate => rates.push(rate),
++    volume: 0.75, onVolumeChange: volume => volumes.push(volume),
++    volumeMax: 1.5, keyboardShortcuts: true,
++    timeline: {
++      sections: [20], phrases: [35],
++      bassBars: [{start: -4, end: 40, color: 'red'}],
++    },
++  };
++  try {
++    flushSync(() => root.render(React.createElement(PlaybackFooter, props)));
++    assert.deepEqual([...element.querySelectorAll('.rawlp-time')].map(time => time.textContent), ['0:59','1:40']);
++    assert.deepEqual([...element.querySelectorAll('.rawlp-section-mark')].map(mark => mark.style.left), ['20%','100%']);
++    const bass = element.querySelector('.rawlp-bass-bar');
++    assert.equal(bass.style.left,'0%');
++    assert.equal(bass.style.width,'40%');
++    assert.equal(element.querySelector('[aria-label="Volume"]').max,'150');
++    element.querySelector('[aria-label="Play"]').click();
++    element.querySelector('[aria-label="Speed up"]').click();
++    element.querySelector('[aria-label="Volume"]').dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true}));
++    document.dispatchEvent(new window.KeyboardEvent('keydown',{code:'Space',key:' ',bubbles:true,cancelable:true}));
++    assert.equal(toggles,2);
++    assert.deepEqual(rates,[1.1]);
++    assert.deepEqual(volumes,[1]);
++    flushSync(() => root.render(React.createElement(PlaybackFooter,{...props,position:60,playing:true})));
++    assert.equal(element.querySelector('.rawlp-bass-bar'),bass);
++    assert.equal(element.querySelector('.rawlp-time').textContent,'1:00');
++    assert(element.querySelector('[aria-label="Pause"]'));
++  } finally {
++    flushSync(() => root.unmount());
++    await new Promise(resolve => setTimeout(resolve,20));
++    window.close();
++    delete globalThis.window;
++    delete globalThis.document;
++  }
++});
++
++test('PlaybackFooter follows the live audio clock frame by frame and stops when paused', async () => {
++  const {window} = new JSDOM('<div id="root"></div>');
++  globalThis.window = window;
++  globalThis.document = window.document;
++  const frames = new Map();
++  let frameId = 0;
++  globalThis.requestAnimationFrame = callback => {
++    frames.set(++frameId, callback);
++    return frameId;
++  };
++  globalThis.cancelAnimationFrame = id => frames.delete(id);
++  const element = document.getElementById('root');
++  const root = createRoot(element);
++  let liveTime = 1;
++  const props = {
++    position: 0, duration: 12, playing: true, getPosition: () => liveTime,
++    onTogglePlay: () => {}, onSeek: () => {},
++    timeline: {sections: [4, 8]},
++  };
++  function advance(time) {
++    liveTime = time;
++    assert.equal(frames.size, 1);
++    const [id, callback] = frames.entries().next().value;
++    frames.delete(id);
++    callback();
++  }
++  try {
++    flushSync(() => root.render(React.createElement(PlaybackFooter, props)));
++    const slider = element.querySelector('input[aria-label="Seek"]');
++    const mark = element.querySelector('.rawlp-section-mark');
++    assert.equal(slider.valueAsNumber, 1);
++    advance(1.017);
++    assert.equal(slider.valueAsNumber, 1.017);
++    advance(2.125);
++    assert.equal(slider.valueAsNumber, 2.125);
++    assert.equal(slider.getAttribute('aria-valuetext'), '0:02');
++    assert.equal(element.querySelector('.rawlp-section-mark'), mark);
++    flushSync(() => root.render(React.createElement(PlaybackFooter, {...props, position: 2.2, playing: false})));
++    assert.equal(slider.valueAsNumber, 2.2);
++    assert.equal(frames.size, 0);
++    flushSync(() => root.render(React.createElement(PlaybackFooter, props)));
++    assert.equal(frames.size, 1);
++  } finally {
++    flushSync(() => root.unmount());
++    await new Promise(resolve => setTimeout(resolve,20));
++    window.close();
++    delete globalThis.requestAnimationFrame;
++    delete globalThis.cancelAnimationFrame;
++    delete globalThis.window;
++    delete globalThis.document;
++  }
++  assert.equal(frames.size, 0);
++});
+diff --git a/tests/playback-keys.test.mjs b/tests/playback-keys.test.mjs
+new file mode 100644
+index 0000000..04ba9f6
+--- /dev/null
++++ b/tests/playback-keys.test.mjs
+@@ -0,0 +1,117 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {JSDOM} from 'jsdom';
++import {bindPlaybackKeys} from '../src/audio/playback-keys.js';
++import {createTransport} from '../src/audio/transport.js';
++
++function keyboard(window) {
++  return (target = window.document.body, init = {}) => {
++    const event = new window.KeyboardEvent('keydown', {
++      key: ' ', bubbles: true, cancelable: true, ...init,
++    });
++    target.dispatchEvent(event);
++    return event.defaultPrevented;
++  };
++}
++
++test('Persistent playback captures Space on links and buttons and honors text entry', () => {
++  const {window} = new JSDOM('<a href="#target">Solo</a><button>Tempo</button><input><textarea></textarea>');
++  const {document} = window;
++  const press = keyboard(window);
++  let count = 0;
++  const app = bindPlaybackKeys({target: document, toggle: () => count++});
++  const [link, button, input, textarea] = document.body.children;
++  button.addEventListener('keydown', () => assert.fail('focused buttons must not handle the captured key'));
++  assert.equal(press(link), true);
++  assert.equal(press(button), true);
++  assert.equal(press(button, {repeat:true}), true);
++  assert.equal(press(input), false);
++  assert.equal(press(textarea), false);
++  assert.equal(count, 2);
++  app.destroy();
++  const all = bindPlaybackKeys({target: document, toggle: () => count++, allowInInputs:true});
++  assert.equal(press(input), true);
++  assert.equal(count, 3);
++  all.destroy();
++  assert.equal(press(link), false);
++  window.close();
++});
++
++test('Space pauses the latest active player and consumes repeats of that press', () => {
++  const {window} = new JSDOM();
++  const target = window.document;
++  const press = keyboard(window);
++  const pauses = [];
++  const first = bindPlaybackKeys({target, pause: () => {
++    pauses.push('first');
++    first.setActive(false);
++  }});
++  const second = bindPlaybackKeys({target, pause: () => {
++    pauses.push('second');
++    second.setActive(false);
++  }});
++  assert.equal(press(), false);
++  first.setActive(true);
++  second.setActive(true);
++  assert.equal(press(), true);
++  assert.equal(press(undefined, {repeat: true}), true);
++  assert.deepEqual(pauses, ['second']);
++  assert.equal(press(), true);
++  assert.deepEqual(pauses, ['second', 'first']);
++  assert.equal(press(undefined, {repeat: true}), true);
++  assert.equal(press(), false);
++  first.destroy();
++  second.destroy();
++  window.close();
++});
++
++test('A reader can suppress idle scrolling without taking Space from focused controls', () => {
++  const {window} = new JSDOM('<input><button><span></span></button><summary></summary>'
++    + '<div contenteditable><strong></strong></div><div role="slider"></div>');
++  const target = window.document;
++  const press = keyboard(window);
++  const binding = bindPlaybackKeys({target, pause: () => assert.fail(), preventScrollWhenIdle: true});
++  assert.equal(press(), true);
++  for (const control of target.querySelectorAll('input, button span, summary, strong, [role="slider"]')) {
++    assert.equal(press(control), false);
++  }
++  for (const options of [{ctrlKey: true}, {metaKey: true}, {altKey: true}, {shiftKey: true}, {isComposing: true}]) {
++    assert.equal(press(undefined, options), false);
++  }
++  const dialog = target.createElement('dialog');
++  dialog.open = true;
++  target.body.append(dialog);
++  assert.equal(press(), false);
++  binding.destroy();
++  dialog.remove();
++  assert.equal(press(), false);
++  window.close();
++});
++
++test('The transport shortcut cancels preparation without starting the engine later', async t => {
++  const {window} = new JSDOM();
++  globalThis.document = window.document;
++  globalThis.cancelAnimationFrame = () => {};
++  t.after(() => {
++    delete globalThis.document;
++    delete globalThis.cancelAnimationFrame;
++    window.close();
++  });
++  const press = keyboard(window);
++  let finishResume;
++  const audio = {
++    getContext: () => ({resume: () => new Promise(resolve => { finishResume = resolve; })}),
++    prepare: () => assert.fail('cancelled preparation must not start'),
++    stop: () => {},
++  };
++  const transport = createTransport({makePlan: () => {}, audio});
++  transport.load({beats: 4, tempo: 120});
++  const play = transport.play();
++  assert.equal(transport.state, 'loading');
++  assert.equal(press(), true);
++  assert.equal(transport.state, 'paused');
++  finishResume();
++  await play;
++  assert.equal(press(), false);
++  transport.destroy();
++});
+diff --git a/tests/playback-measure.test.mjs b/tests/playback-measure.test.mjs
+new file mode 100644
+index 0000000..aed9bb2
+--- /dev/null
++++ b/tests/playback-measure.test.mjs
+@@ -0,0 +1,113 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import React from 'react';
++import {flushSync} from 'react-dom';
++import {createRoot} from 'react-dom/client';
++import {JSDOM} from 'jsdom';
++import {PlaybackMeasureBorders,RawlNotation} from 'librawl';
++import {createSectionPlaybackClock} from 'librawl/native';
++
++function mount(t){
++ const {window}=new JSDOM('<div id="root"></div>');
++ globalThis.window=window;
++ globalThis.document=window.document;
++ const host=document.getElementById('root'),root=createRoot(host);
++ t.after(async()=>{
++  flushSync(()=>root.unmount());
++  await new Promise(resolve=>setTimeout(resolve,20));
++  window.close();
++  delete globalThis.document;
++  delete globalThis.window;
++ });
++ return {
++  host,
++  render:(Component,props)=>flushSync(()=>root.render(React.createElement(Component,props))),
++  active:()=>[...host.querySelectorAll('.rawln-playback-measure:not([hidden])')],
++ };
++}
++
++test('the displayed current measure follows the beat clock across splits, rests and seeks',t=>{
++ const {host,render,active}=mount(t),clock=createSectionPlaybackClock();
++ render(RawlNotation,{notes:[],beats:12,rows:[{start:0,end:6},{start:6,end:12}],phraseStarts:[12],playbackClock:clock});
++ const bar=beat=>host.querySelector(`.rawln-bar[data-beat="${beat}"]`);
++ assert.equal(bar(0).style.left,'0px');
++ assert.equal(bar(0).dataset.phraseBoundary,'true');
++ assert.match(bar(4).style.left,/^calc\(66\.666[^%]*% - 1px\)$/);
++ assert.equal(bar(12).dataset.terminal,'true');
++ assert.equal(bar(12).style.left,'calc(100% - 1px)');
++ assert.equal(active().length,0);
++ const current=(measure,row,width,beginsRow)=>{
++  const [border]=active();
++  assert.equal(active().length,1);
++  assert.equal(border.dataset.measure,String(measure));
++  assert.equal(border.closest('.rawln-row').dataset.start,String(row));
++  const widthPattern=beginsRow?/^([\d.]+)%$/:/^calc\(([\d.]+)% \+ 1px\)$/;
++  const widthParts=widthPattern.exec(border.style.width);
++  if(beginsRow)assert.equal(border.style.left,'0px');
++  else assert.match(border.style.left,/^calc\([\d.]+% - 1px\)$/);
++  assert(widthParts);
++  assert(Math.abs(Number(widthParts[1])-width)<1e-3);
++  assert.equal(border.style.borderTopWidth,'1px');
++  assert.equal(border.style.borderBottomWidth,'1px');
++  assert.equal(border.style.borderTopColor,'rgb(68, 68, 68)');
++  assert.equal(border.style.pointerEvents,'none');
++ };
++ clock.advance(0);
++ current(1,0,4/6*100,true);
++ clock.advance(4);
++ current(2,0,2/6*100,false);
++ clock.advance(6);
++ current(2,6,2/6*100,true);
++ clock.advance(8);
++ current(3,6,4/6*100,false);
++ clock.advance(12);
++ assert.equal(active().length,0);
++ clock.advance(2);
++ current(1,0,4/6*100,true);
++ clock.reset();
++ assert.equal(active().length,0);
++});
++
++test('authored playback intervals follow recording time and repeated overlay passes',t=>{
++ const {render,active}=mount(t),clock=createSectionPlaybackClock();
++ const measureMap=[
++  {start:0,duration:2,sourceNumber:'pickup',playbackSpans:[[10,13],[12,13.5],[50,52]]},
++  {start:2,duration:3,sourceNumber:1,playbackSpans:[[14,20],[52,57]]},
++  {start:5,duration:3,sourceNumber:2,playbackSpans:[]},
++ ];
++ const playing=()=>active().map(el=>[el.dataset.measure,el.closest('.rawln-row').dataset.start]);
++ clock.advance(12.5);
++ render(RawlNotation,{
++  notes:[],beats:8,rows:[{start:0,end:3},{start:3,end:8}],playbackClock:clock,measureMap,
++ });
++ assert.deepEqual(playing(),[['pickup','0']]);
++ clock.advance(13);
++ assert.deepEqual(playing(),[['pickup','0']]);
++ clock.advance(13.5);
++ assert.deepEqual(playing(),[]);
++ clock.advance(14);
++ assert.deepEqual(playing(),[['1','0']]);
++ clock.advance(16);
++ assert.deepEqual(playing(),[['1','3']]);
++ clock.advance(50);
++ assert.deepEqual(playing(),[['pickup','0']]);
++ clock.advance(57);
++ assert.deepEqual(playing(),[]);
++ clock.advance(6);
++ assert.deepEqual(playing(),[]);
++});
++
++test('controlled position and Rawl’s independent edge flags share the visual primitive',t=>{
++ const {render,active}=mount(t);
++ const props={notes:[],beats:8};
++ render(RawlNotation,{...props,position:4});
++ assert.equal(active()[0].dataset.measure,'2');
++ render(RawlNotation,{...props,position:null});
++ assert.equal(active().length,0);
++ render(PlaybackMeasureBorders,{left:23,width:100,top:false});
++ const border=active()[0];
++ assert.equal(border.style.left,'23px');
++ assert.equal(border.style.width,'100px');
++ assert.equal(border.style.borderTopWidth,'');
++ assert.equal(border.style.borderBottomWidth,'1px');
++});
+diff --git a/tests/recording-roll.test.mjs b/tests/recording-roll.test.mjs
+new file mode 100644
+index 0000000..4b6c02a
+--- /dev/null
++++ b/tests/recording-roll.test.mjs
+@@ -0,0 +1,93 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import React from 'react';
++import {flushSync} from 'react-dom';
++import {createRoot} from 'react-dom/client';
++import {JSDOM} from 'jsdom';
++import {RawlNotation} from 'librawl';
++import {createSectionPlaybackClock} from 'librawl/native';
++
++test('recording intervals drive notes independently of overlapping display beats', async () => {
++  const window = new JSDOM('<div id="root"></div>').window;
++  globalThis.window = window;
++  globalThis.document = window.document;
++  const element = document.getElementById('root');
++  const root = createRoot(element);
++  const clock = createSectionPlaybackClock();
++  const sounding = () => [...element.querySelectorAll('.rawln-sounding')].map(note => [
++    note.dataset.note, note.closest('.rawln-row').dataset.start,
++  ]);
++  const notes = [
++    {id:'first',pitch:60,start:1,duration:2,voice:0,playbackSpan:[10,14]},
++    {id:'later',pitch:62,start:1,duration:2,voice:0,playbackSpan:[20,24]},
++  ];
++  clock.advance(21);
++  try {
++    flushSync(() => root.render(React.createElement(RawlNotation, {
++      notes, beats:4, rows:[{start:0,end:2},{start:2,end:4}], playbackClock:clock,
++      recolorable:false,
++      renderUnderlay:(row,axis) => React.createElement('div', {
++        'data-underlay-top':axis.pitchToY(62),
++      }),
++    })));
++    const note = element.querySelector('[data-note="later"]');
++    assert.equal(note.style.height, '10px');
++    assert.deepEqual(sounding(), [['later','0']]);
++    clock.advance(12);
++    assert.deepEqual(sounding(), [['first','2']]);
++    assert.equal(note.style.height, '5px');
++    assert.equal(element.querySelector('.rawln-score [data-underlay-top]').dataset.underlayTop,'20');
++  } finally {
++    flushSync(() => root.unmount());
++    await new Promise(resolve => setTimeout(resolve,20));
++    window.close();
++    delete globalThis.window;
++    delete globalThis.document;
++  }
++});
++
++test('alignScoreRows aligns the downbeats with equal time scale across pickup and full rows', async () => {
++  const {alignScoreRows} = await import('librawl/geometry');
++  const {rows, width} = alignScoreRows([
++    {start:0,end:52,anchor:4}, {start:52,end:100,anchor:52}, {start:100,end:112},
++  ]);
++  assert.equal(width,52);
++  assert.equal(rows[0].style.width,'100%');
++  const beatPercent = 100 / 52;
++  for (const row of rows.slice(1)) {
++    assert(Math.abs(parseFloat(row.style.marginLeft) - 4 * beatPercent) < 1e-9);
++    assert(Math.abs(parseFloat(row.style.width) - (row.end-row.start) * beatPercent) < 1e-9);
++  }
++});
++
++test('score seeking uses the transport clock while measure recoloring keeps playback in place', async () => {
++  const {window} = new JSDOM('<div id="root"></div>');
++  globalThis.window = window;
++  globalThis.document = window.document;
++  const element = document.getElementById('root');
++  const root = createRoot(element);
++  const seeks = [];
++  const clock = {...createSectionPlaybackClock(), seek: beat => seeks.push(beat)};
++  const notes = [{id:'note',pitch:62,start:1,duration:1,voice:0}];
++  const click = (node, x = 0) => flushSync(() => node.dispatchEvent(
++    new window.MouseEvent('click', {bubbles:true, clientX:x}),
++  ));
++  try {
++    flushSync(() => root.render(React.createElement(RawlNotation, {notes, beats:4, playbackClock:clock})));
++    const score = element.querySelector('.rawln-score');
++    score.getBoundingClientRect = () => ({left:10,width:200});
++    click(score, 110);
++    click(element.querySelector('[data-note="note"]'));
++    assert.deepEqual(seeks,[2,1]);
++    click(element.querySelector('.rawln-measure-number'));
++    click(element.querySelector('[data-note="note"]'));
++    assert.deepEqual(seeks,[2,1]);
++    assert.equal(element.querySelector('[data-note="note"]').dataset.degree,'0');
++  } finally {
++    flushSync(() => root.unmount());
++    await new Promise(resolve => setTimeout(resolve,20));
++    window.close();
++    delete globalThis.window;
++    delete globalThis.document;
++  }
++});
+diff --git a/tests/roman-numeral-tooltip.test.mjs b/tests/roman-numeral-tooltip.test.mjs
+new file mode 100644
+index 0000000..b360839
+--- /dev/null
++++ b/tests/roman-numeral-tooltip.test.mjs
+@@ -0,0 +1,80 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import {JSDOM} from 'jsdom';
++import {bindRomanNumeralTooltip} from '../src/notation/bind-roman-numeral-tooltip.mjs';
++import {romanNumeralTooltipHTML, romanNumeralTooltipModel} from '../src/notation/roman-numeral-tooltip.mjs';
++
++const parse = html => new JSDOM(html).window.document;
++const notePitches = column => [...column.querySelectorAll('.rawln-rn-tooltip-note')].map(note => Number(note.dataset.pitch));
++
++test('Caplin RN tooltip shares a pitch axis, spells inversions and anchors tonic and fifth guides', () => {
++  const label = 'V⁶₅/V';
++  const model = romanNumeralTooltipModel(label);
++  assert.deepEqual(model.pitches, [6,9,12,14]);
++  assert.deepEqual(model.rootPitches, [2,6,9,12]);
++  const document = parse(romanNumeralTooltipHTML(label, {}, model));
++  const columns = [...document.querySelectorAll('.rawln-rn-tooltip-column')];
++  assert.deepEqual(columns.map(notePitches), [model.rootPitches, model.pitches]);
++  assert.deepEqual(columns.map(column => column.querySelector('.rawln-rn-tooltip-grid').style.height),
++    Array(2).fill(columns[0].querySelector('.rawln-rn-tooltip-grid').style.height));
++  for (const column of columns) {
++    for (const note of column.querySelectorAll('.rawln-rn-tooltip-note:is([data-degree="0"], [data-degree="7"])')) {
++      const guide = column.querySelector(`.rawln-rn-tooltip-guide[data-pitch="${note.dataset.pitch}"]`);
++      assert.equal(parseFloat(guide.style.top), parseFloat(note.style.top) + 12);
++    }
++  }
++  assert.equal(columns[1].querySelector('.rawln-rn-tooltip-kind').textContent, 'квинтсекстаккорд');
++  assert.equal(document.querySelector('[data-symbol="applied"]').textContent,
++    '/ — аккорд рассчитан относительно ступени справа как временной тоники.');
++  assert.equal(document.querySelector('[data-symbol="figures65"]').textContent,
++    'Цифры справа обозначают интервалы над басом: 6/5 — секста и квинта.');
++  assert.equal(document.querySelector('[data-symbol="intervals"]'), null);
++});
++
++test('Jazz tooltip preserves explicit extensions and bass while avoiding figured-bass descriptions', () => {
++  const notation = 'Imaj9/II', options = {jazz: true, rootPitch: 0, bassPitch: 2};
++  const model = romanNumeralTooltipModel(notation, options, {pitches: [-10,0,4,7,11,14]});
++  const document = parse(romanNumeralTooltipHTML(notation, options, model));
++  assert.deepEqual(notePitches(document), [-10,0,4,7,11,14]);
++  assert.equal(document.querySelector('.chord-bass').textContent, 'II');
++  assert.equal(document.querySelector('.rawln-rn-explanations'), null);
++  assert.equal(romanNumeralTooltipModel(notation, options, {pitches: [Infinity]}), null);
++  assert.equal(romanNumeralTooltipModel(notation, options, {pitches: [99999999999]}), null);
++});
++
++test('Tooltip opens on hover, focus and click, and preserves native Space handling', () => {
++  const dom = new JSDOM('<div id="scroll"><span id="a" tabindex="0" aria-describedby="extra">V</span><span id="b" tabindex="0">I</span></div>');
++  const {window} = dom, {document} = window, first = document.querySelector('#a'), second = document.querySelector('#b');
++  first.getBoundingClientRect = () => ({left: 0, top: 0, width: 12, bottom: 18});
++  const detachFirst = bindRomanNumeralTooltip(first, () => '<span>V</span>');
++  const detachSecond = bindRomanNumeralTooltip(second, () => '<span>I</span>');
++  try {
++    first.dispatchEvent(new window.MouseEvent('pointerover', {bubbles:true}));
++    const popup = () => document.querySelector('[role="tooltip"]');
++    assert.equal(popup().textContent,'V');
++    assert.equal(first.getAttribute('aria-describedby'),'extra ' + popup().id);
++    assert.equal(popup().style.left,'8px');
++    assert.equal(popup().style.top,'27px');
++    second.focus();
++    assert.equal(popup().textContent,'I');
++    assert.equal(first.getAttribute('aria-describedby'),'extra');
++    first.dispatchEvent(new window.MouseEvent('click', {bubbles:true}));
++    assert.equal(popup().textContent,'V');
++    assert.equal(first.dispatchEvent(new window.KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true})),true);
++    first.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
++    assert.equal(popup(),null);
++    assert.equal(first.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})),false);
++    assert.equal(popup().textContent,'V');
++    document.querySelector('#scroll').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true}));
++    assert.equal(popup(),null);
++    first.dispatchEvent(new window.MouseEvent('click',{bubbles:true}));
++    assert.equal(popup().textContent,'V');
++    detachFirst();
++    assert.equal(popup(),null);
++    assert.equal(first.getAttribute('aria-describedby'),'extra');
++  } finally {
++    detachFirst();
++    detachSecond();
++    window.close();
++  }
++});
+diff --git a/tests/roman-numerals.test.mjs b/tests/roman-numerals.test.mjs
+new file mode 100644
+index 0000000..a2de61e
+--- /dev/null
++++ b/tests/roman-numerals.test.mjs
+@@ -0,0 +1,55 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {JSDOM} from 'jsdom';
++import {createElement} from 'react';
++import {renderToStaticMarkup} from 'react-dom/server';
++import {RomanNumeral} from 'librawl/components';
++import {romanNumeralHTML} from 'librawl/roman-numerals';
++import {staveGeometry} from 'librawl/geometry';
++
++const elements = (notation, options) => new JSDOM(romanNumeralHTML(notation, options)).window.document;
++const degree = (document, selector) => [...document.querySelectorAll(selector)].map(node => Number(node.dataset.root));
++
++test('Caplin colors applied roots and stacked inversion figures by sounding pitch', () => {
++  const document = elements('V⁶₅/V');
++  assert.deepEqual(degree(document,'.chord-root'),[2,7]);
++  assert.deepEqual(degree(document,'.chord-figure'),[0,6]);
++  assert.equal(document.querySelector('.figures').children.length,2);
++});
++
++test('Jazz extensions retain atomic figures, minor case and independent slash-bass colors', () => {
++  const document = elements('IIm7/IV',{jazz:true,bassPitch:5});
++  assert.equal(document.querySelector('.chord-root').textContent,'ii');
++  assert.deepEqual(degree(document,'.chord-figure'),[0]);
++  assert.deepEqual(degree(document,'.chord-bass'),[5]);
++  const extended = elements('V13♭9',{jazz:true});
++  assert.deepEqual([...extended.querySelectorAll('.chord-figure')].map(node=>node.dataset.figure),['13','9']);
++  assert.deepEqual(degree(extended,'.chord-figure'),[4,8]);
++  assert.equal(elements('<script>alert(1)</script>',{jazz:true}).querySelector('script'),null);
++});
++
++test('Score scaling preserves baseline pitch spacing and reserves room for growing notes', () => {
++  const defaults=staveGeometry({low:60,high:62});
++  assert.equal(defaults.pitchStep,3);
++  assert.equal(defaults.glyphHeight,5);
++  const zoom=staveGeometry({low:60,high:62},{noteScale:2});
++  assert.equal(zoom.pitchToY(60)-zoom.pitchToY(61),6);
++  assert.equal(zoom.glyphHeight,10);
++  assert.equal(zoom.noteTop-zoom.glyphHeight,defaults.noteTop-defaults.glyphHeight);
++});
++
++
++test('sans root accidental spacing leaves the chord text and extension markup intact', () => {
++  const options={jazz:true,font:'sans-serif'};
++  const notation='bIIIb13';
++  const rendered=new JSDOM(renderToStaticMarkup(createElement(RomanNumeral,{notation,options}))).window.document;
++  for(const document of [elements(notation,options),rendered]){
++    const chord=document.querySelector('.rawln-roman');
++    assert.equal(chord.getAttribute('data-roman-font'),'sans-serif');
++    assert.equal(chord.textContent,'♭III♭13');
++    assert.equal(chord.querySelector('.chord-root > .chord-accidental').textContent,'♭');
++    assert.equal(chord.querySelector('.chord-figure').textContent,'♭13');
++    assert.equal(chord.querySelector('.chord-figure .chord-accidental'),null);
++  }
++  assert.equal(elements('♭III').querySelector('.rawln-roman').hasAttribute('data-roman-font'),false);
++});
+diff --git a/types/audio.d.ts b/types/audio.d.ts
+index 05007b0..0412d22 100644
+--- a/types/audio.d.ts
++++ b/types/audio.d.ts
+@@ -13,6 +13,7 @@ export interface SoundFontEngine {
+ export interface SoundFontOptions {assetBase?:string;libraryUrl?:string;workletUrl?:string;additionalBanks?:SoundBank[];allowAuditionPrograms?:boolean;environment?:typeof globalThis;importLibrary?:(url:string)=>Promise<unknown>;fetch?:typeof fetch;}
+ export interface SoundFontPlayback {prepare(context:AudioContext):Promise<SoundFontEngine>;stop():void;stopAudition():void;getContext():AudioContext|undefined;getPreparationState():{phase:string;pending:boolean;error:string|null};PlaybackEngine:new(context:AudioContext,synth:any)=>SoundFontEngine;presentationTime(context:AudioContext):number;soundingIntervals(plan:any,note:any):number[][];room:Readonly<{wet:number;seconds:number;decaySeconds:number;preDelay:number;seed:number}>;roomImpulse(context:AudioContext):AudioBuffer;masterGain:number;}
+ export function createSoundFontPlayback(options?:SoundFontOptions):SoundFontPlayback;
+-export function createTransport(options:{makePlan:(data:any,tempo:number)=>any;audio?:SoundFontPlayback;onState?:(state:string)=>void;onPosition?:(beat:number|null)=>void;onError?:(error:Error)=>void}):any;
++export function createTransport(options:{makePlan:(data:any,tempo:number)=>any;audio?:SoundFontPlayback;onState?:(state:string)=>void;onPosition?:(beat:number|null)=>void;onError?:(error:Error)=>void;keyboardTarget?:Document|false}):any;
+
+ export function bindTempoKeys(options:{target?:Document;adjustTempo:(delta:number,event:KeyboardEvent)=>unknown;enabled?:()=>boolean}):()=>void;
++export function bindPlaybackKeys(options:{target?:Document;pause?:()=>void;toggle?:()=>void;enabled?:()=>boolean;allowInInputs?:boolean;preventScrollWhenIdle?:boolean}):{setActive(active:boolean):void;destroy():void};
+diff --git a/types/components.d.ts b/types/components.d.ts
+index b494451..42a8e96 100644
+--- a/types/components.d.ts
++++ b/types/components.d.ts
+@@ -1,4 +1,63 @@
+ import * as React from 'react';
+-export {RawlMeasureHeader} from './notation';
++export {RawlMeasureHeader,PlaybackMeasureBorders,PlaybackMeasureLayer} from './notation';
++export * from './piano-legend';
+ export interface TonicSymbolProps {left:number;number:number;previousTonic:number|null;modulationDiff:number|null;tonicStart:number|null;alignToOnset?:boolean;transpose?:number;renderArrow?:(shift:{direction:'up'|'down';semitones:number;modulationDiff:number})=>React.ReactNode;flagClassName?:string;labelClassName?:string;flagAttributes?:React.HTMLAttributes<HTMLDivElement>;labelAttributes?:React.HTMLAttributes<HTMLSpanElement>;}
+ export const TonicSymbol:React.FC<TonicSymbolProps>;
++export interface PlaybackTimeline {
++  sections?: readonly number[];
++  phrases?: readonly number[];
++  coloredMarks?: readonly {time: number; color: string}[];
++  bassBars?: readonly {start: number; end: number; color: string}[];
++}
++
++/** All timeline positions and the duration are in seconds. Volume 1 is 100%. */
++export interface PlaybackFooterProps {
++  position: number;
++  duration: number;
++  playing: boolean;
++  /** Read the live playback position in seconds while playing. */
++  getPosition?: () => number;
++  onTogglePlay: () => void;
++  onSeek: (seconds: number) => void;
++  rate?: number;
++  onRateChange?: (rate: number) => void;
++  volume?: number;
++  onVolumeChange?: (volume: number) => void;
++  volumeMax?: number;
++  timeline?: PlaybackTimeline;
++  keyboardShortcuts?: boolean;
++  allowSpaceInInputs?: boolean;
++  disabled?: boolean;
++  beforeTimeline?: React.ReactNode;
++  children?: React.ReactNode;
++}
++export const PlaybackFooter: React.FC<PlaybackFooterProps>;
++/** Read and paint immediately, then on each animation frame until disposed. */
++export function observePlaybackPosition(readPosition: () => number, paintPosition: (position: number) => void): () => void;
++
++import type { RomanNumeralOptions, RomanNumeralTooltipOptions } from './roman-numerals';
++export const RomanNumeral: React.FC<{notation: string; options?: RomanNumeralOptions; tooltip?: boolean | RomanNumeralTooltipOptions}>;
++export interface ScoreSizeSlidersProps {
++  noteHeight: number;
++  timeSpacing: number;
++  onNoteHeightChange: (height: number) => void;
++  onTimeSpacingChange: (spacing: number) => void;
++  keyboardShortcuts?: boolean;
++  titles?: {noteHeight?: string; timeSpacing?: string};
++}
++export const ScoreSizeSliders: React.FC<ScoreSizeSlidersProps>;
++
++export const ScorePinchContent: React.FC<{
++  children?: React.ReactNode;
++  activeRef: {current: boolean};
++  fitWidth?: boolean;
++}>;
++/** Enable the Rawl axis-locked preview and deferred size commit on a score. */
++export function useScorePinch(
++  container: React.RefObject<HTMLDivElement | null>,
++  noteHeight: number,
++  timeSpacing: number,
++  setNoteHeight: (height: number) => void,
++  setTimeSpacing: (spacing: number) => void,
++  enabled?: boolean
++): {current: boolean};
+diff --git a/types/geometry.d.ts b/types/geometry.d.ts
+index 12f35ed..f2171ee 100644
+--- a/types/geometry.d.ts
++++ b/types/geometry.d.ts
+@@ -3,3 +3,5 @@ export const PITCH_STEP:3;export const NOTE_HEIGHT:5;export const TOP_CLEARANCE:
+ export function mod(n:number):number;
+ export function tonicAt(tonic:number,changes:Array<{beat:number;tonic:number}>,beat:number):number;
+ export const TONIC_NAMES:string[];
++import type {ScoreRow} from './notation';
++export function alignScoreRows<Row extends ScoreRow & {anchor?:number}>(rows:readonly Row[]):{width:number;rows:Row[]};
+diff --git a/types/index.d.ts b/types/index.d.ts
+index 606e1a2..eab72a1 100644
+--- a/types/index.d.ts
++++ b/types/index.d.ts
+@@ -1,5 +1,9 @@
+ export * from './notation';
+ export {TonicSymbol,TonicSymbolProps} from './components';
++export {PlaybackFooter,PlaybackFooterProps,PlaybackTimeline} from './components';
+ export * from './audio';
+
+ export {createShiftHoverAudition,ShiftHoverAudition,ShiftHoverAuditionOptions} from './native';
++
++export {RomanNumeral,ScoreSizeSliders,ScoreSizeSlidersProps} from './components';
++export * from './piano-legend';
+diff --git a/types/piano-legend.d.ts b/types/piano-legend.d.ts
+new file mode 100644
+index 0000000..eab4ee1
+--- /dev/null
++++ b/types/piano-legend.d.ts
+@@ -0,0 +1,34 @@
++import type { FC, ReactNode } from 'react';
++
++export type PianoLegendAudition = (
++  pitches: number[],
++  options: { kind: 'note' | 'chord' | 'scale'; onActiveNote?: (index: number | null) => void }
++) => void | (() => void);
++export interface PianoLegendProps {
++  currentTonic?: number;
++  inline?: boolean;
++  enabledPitches?: readonly number[];
++  activePitch?: number | null;
++  /** Pitches use the Rawl C3 register (MIDI = 48 + pitch). */
++  onAudition?: PianoLegendAudition;
++}
++export const PianoLegend: FC<PianoLegendProps>;
++export const InlinePianoLegend: FC<Omit<PianoLegendProps, 'inline'>>;
++export interface PianoLegendMode {
++  title: string;
++  chords: readonly {
++    name: string;
++    pitches: readonly number[];
++    /** Optional pre-voiced tonic-relative register, used for drawing and audition. */
++    positions?: readonly number[];
++    romanLabel?: ReactNode;
++  }[];
++}
++export const FoldablePianoLegend: FC<{
++  currentTonic?: number;
++  modes?: readonly PianoLegendMode[];
++  onAudition?: PianoLegendAudition;
++  setHoveredColors?: (colors: string[] | null) => void;
++  /** Override the preference key. New users start with the legend folded. */
++  storageKey?: string;
++}>;
+diff --git a/types/roman-numerals.d.ts b/types/roman-numerals.d.ts
+new file mode 100644
+index 0000000..7620090
+--- /dev/null
++++ b/types/roman-numerals.d.ts
+@@ -0,0 +1,31 @@
++export interface RomanNumeralOptions {
++  theme?: 'light' | 'dark';
++  /** Use the shared sans-serif face and its accidental spacing. */
++  font?: 'serif' | 'sans-serif';
++  /** Jazz figures denote extensions instead of classical inversions. */
++  jazz?: boolean;
++  rootPitch?: number;
++  /** Tonic-relative pitch of an explicit bass, rather than an applied target. */
++  bassPitch?: number | null;
++  figurePitches?: Readonly<Record<string, number>>;
++  colorRoots?: boolean;
++  colorFigures?: boolean;
++  colorQuality?: boolean;
++  colorOffset?: number;
++  mode?: 'major' | 'minor';
++  seventhInterval?: 9 | 10 | 11;
++  cadentialSixFour?: boolean;
++  contextChord?: string;
++  hideAppliedTarget?: boolean;
++}
++
++export interface RomanNumeralTooltipOptions {
++  /** Tonic-relative semitone offsets. Keep octaves to show the desired voicing. */
++  pitches: readonly number[];
++  /** Optional comparison voicing for a chord with a non-root bass. */
++  rootPitches?: readonly number[];
++  rootNotation?: string;
++  inversion?: number;
++}
++export function romanNumeralHTML(notation: string, options?: RomanNumeralOptions): string;
++export function romanNumeralContent(notation: string, options?: RomanNumeralOptions): string;

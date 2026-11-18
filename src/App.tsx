@@ -1,137 +1,47 @@
 import {
-  FC,
-  Fragment,
-  ReactNode,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import "./App.css";
 import data from "../data/wjd_maj_blues.json";
-import jazztubeData from "../data/jazztube.json";
+import playbackData from "../data/playback.json";
+import type { TonicChange } from "librawl";
+import { useNotePlaybackClock } from "librawl/native";
+import { ScoreSizeSliders } from "librawl/components";
+import { PITCH_STEP } from "librawl/geometry";
+import "librawl/score-size-sliders.css";
 import Papa from "papaparse";
-import YouTube, { YouTubePlayer } from "react-youtube";
-import TonalGrid from "./components/TonalGrid";
-import useLocalStorageSet from "./components/useLocalStorageSet";
-
-const BAD_VIDEOS = new Set([
-  "RXvA6r_BjWQ",
-  "4LBaCBT2tOs",
-  "1iJdXWY7JRo",
-  "DiNzXslovVk",
-  "FferX_P7SVs",
-  "zQBjD06a6l8",
-  "fBQxsQlPDkU",
-  "lcKQ3wGI8ZQ",
-  "tu4o65SwUIw",
-  "DabNQMNsFJk",
-  "x084gGjWlpY",
-  "tkSrZTEvSkc",
-  "Up4NTq5tkhc",
-  "oxl5L5Wyybk",
-  "74GIncsU9LM",
-  "FeRZPQS0Q98",
-  "xnJl5CXZ82M",
-  "wAMYl6kJkjo",
-]);
+import TonalGrid, { DEFAULT_TIME_SPACING } from "./components/TonalGrid";
+import { SoloAudio, type AudioExcerpt } from "./components/SoloPlayback";
+import { SoloPianoLegend } from "./components/SoloPianoLegend";
+import { SoloMetadata } from "./components/SoloMetadata";
+import { buildTonalScore, type BeatsItem, type MelodyItem } from "./tonalScore";
+import { instrumentName, weimarRecordings, type JazzSolo } from "./weimar";
 
 const STYLES = {
-  TRADITIONAL: "1910..30s",
-  SWING: "1930..40s",
-  BEBOP: "1940..50s",
-  COOL: "1950..60s",
-  HARDBOP: "1950..60s",
-  POSTBOP: "1960..90s",
+  TRADITIONAL: "trad",
+  SWING: "swing",
+  BEBOP: "bebop",
+  COOL: "cool",
+  HARDBOP: "hardbop",
+  POSTBOP: "postbop",
 };
 
-const INSTRUMENTS = {
-  as: "alto saxophone",
-  bcl: "bass clarinet",
-  bs: "baritone saxophone",
-  cor: "cornet",
-  g: "guitar",
-  ss: "soprano saxophone",
-  tb: "trombone",
-  tp: "trumpet",
-  ts: "tenor saxophone",
-  vib: "vibraphone",
-};
+const INITIAL_SOLO = 1;
 
-type YoutubeEntry = {
-  index: number;
-  db: string;
-  melid: number;
-  mf_median: number;
-  mf_min: number;
-  query: string;
-  solo_end_sec: number;
-  solo_start_sec: number;
-  wp_end_idx: string;
-  wp_start_idx: string;
-  youtube_id: string;
-};
-
-type YoutubeEntries = {
-  [key: string]: YoutubeEntry[];
-};
-
-const youtubeVideos: YoutubeEntries = jazztubeData;
+const playbackBySolo: Record<string, { audio?: AudioExcerpt } | undefined> = playbackData;
+const NO_CHANGES: TonicChange[] = [];
 
 const capitalizeWords = (text: string): string => {
-  let words = text.split(/ /g);
+  const words = text.split(/ /g);
   for (let i = 0; i < words.length; i++) {
     words[i] = words[i][0].toUpperCase() + words[i].slice(1);
   }
   return words.join(" ");
 };
-
-type JazzSolo = {
-  melid: number;
-  trackid: number;
-  compid: number;
-  recordid: number;
-  performer: string;
-  title: string;
-  titleaddon: string;
-  solopart: number;
-  instrument: string;
-  style: string;
-  avgtempo: number;
-  tempoclass: string;
-  rhythmfeel: string;
-  key: string;
-  signature: string;
-  chord_changes: string;
-  chorus_count: number;
-  composer: string;
-  form: string;
-  template: string;
-  tonalitytype: string;
-  genre: string;
-};
-
-export type MelodyItem = {
-  onset: number;
-  duration: number;
-  pitch: number;
-};
-
-export type BeatsItem = {
-  bar: number;
-  beat: number;
-  onset: number;
-  chord: string;
-};
-
-export type Note = {
-  onset: number;
-  duration: number;
-  pitch: number;
-};
-
-export const melodyStorage: { [key: number]: MelodyItem[] } = {};
-export const beatsStorage: { [key: number]: BeatsItem[] } = {};
 
 const makeFileName = ({ title, performer, solopart }: JazzSolo) =>
   performer.replace(/\./g, "").replace(/ /g, "") +
@@ -143,320 +53,212 @@ const makeFileName = ({ title, performer, solopart }: JazzSolo) =>
   (solopart > 1 ? `-${solopart}` : "") +
   "_Solo.csv";
 
-const CsvLoader: FC<{
-  filePath: string;
-  setData: (data: any) => void;
-}> = ({ filePath, setData }) => {
-  const [data, innerSetData] = useState<Array<any>>([]);
+async function loadCsv<T>(filePath: string, signal: AbortSignal) {
+  const response = await fetch(import.meta.env.BASE_URL + filePath, { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status} for ${filePath}`);
+  const { data } = Papa.parse<T>(await response.text(), {
+    header: true,
+    dynamicTyping: true,
+    skipEmptyLines: true,
+  });
+  return data;
+}
 
+function useSoloData(fileName: string) {
+  const [loaded, setLoaded] = useState<{
+    fileName: string;
+    melody: MelodyItem[];
+    beats: BeatsItem[];
+  }>();
   useEffect(() => {
-    fetch(filePath)
-      .then((response) => response.text())
-      .then((csvText) => {
-        Papa.parse(csvText.trim(), {
-          complete: ({ data }) => {
-            innerSetData(data);
-            setData(data);
-          },
-          header: true,
-          dynamicTyping: true,
-        });
-      })
-      .catch((error) => console.error("Error loading the CSV file:", error));
-  }, [filePath]);
-
-  return (
-    <div style={{ fontSize: "10px" }}>
-      <CollapsibleDiv title={filePath}>
-        {data.map((line, index) => (
-          <div key={index}>{JSON.stringify(line)}</div>
-        ))}
-      </CollapsibleDiv>
-    </div>
-  );
-};
+    const controller = new AbortController();
+    const { signal } = controller;
+    Promise.all([
+      loadCsv<MelodyItem>(`csv_melody/${fileName}`, signal),
+      loadCsv<BeatsItem>(`csv_beats/${fileName}`, signal),
+    ]).then(([melody, beats]) => {
+      if (!signal.aborted) setLoaded({ fileName, melody, beats });
+    }).catch((error) => {
+      if (!signal.aborted) console.error("Error loading the CSV file:", error);
+    });
+    return () => controller.abort();
+  }, [fileName]);
+  return loaded?.fileName === fileName ? loaded : undefined;
+}
 
 const solos: JazzSolo[] = data;
+const soloIndices = new Map(solos.map(({ melid }, index) => [melid, index]));
+const soloLink = (melid: number) => `#solo-${melid}`;
 
-const CollapsibleDiv: FC<{ title: string; children?: ReactNode }> = ({
-  title,
-  children,
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
+function soloFromLocation() {
+  const match = /^#solo-(\d+)$/.exec(window.location.hash);
+  return (match && soloIndices.get(Number(match[1]))) ?? INITIAL_SOLO;
+}
 
-  const toggleOpen = () => setIsOpen(!isOpen);
+function decadeRange(years: number[]) {
+  if (years.length === 0) return undefined;
+  const first = Math.floor(Math.min(...years) / 10) * 10;
+  const last = Math.floor(Math.max(...years) / 10) * 10;
+  if (first === last) return `${first}s`;
+  const abbreviated = Math.floor(first / 100) === Math.floor(last / 100)
+    ? String(last % 100).padStart(2, "0") : last;
+  return `${first}..${abbreviated}s`;
+}
 
-  return (
-    <div>
-      <div onClick={toggleOpen} style={{ cursor: "pointer" }}>
-        {title}
-      </div>
-      {isOpen && <div>{children}</div>}
-    </div>
-  );
-};
+const compositionGroups = Object.entries(STYLES).map(([style, label]) => {
+  const performers = new Map<string, { solo: JazzSolo; index: number }[]>();
+  const years: number[] = [];
+  solos.forEach((solo, index) => {
+    if (solo.style !== style) return;
+    const year = weimarRecordings[solo.melid]?.recording_year;
+    if (year != null) years.push(year);
+    const entries = performers.get(solo.performer) ?? [];
+    entries.push({ solo, index });
+    performers.set(solo.performer, entries);
+  });
+  return { style, label, years: decadeRange(years), performers: [...performers] };
+});
+
+function eraForSolo(index: number) {
+  return compositionGroups.find(({ style }) => style === solos[index].style) ?? compositionGroups[0];
+}
 
 function App() {
-  // TODO: store selectedSolo via melid and persist to URL:
-  // https://chat.openai.com/share/54d40902-ea4f-4d83-83aa-4cc444198010
-  const [selectedSolo, setSelectedSolo] = useState(1);
-  const [selectedOverlaidSolos, setSelectedOverlaidSolos] = useState(
-    new Set([1])
-  );
-  const melodyData = melodyStorage[selectedSolo];
-  const beatsData = beatsStorage[selectedSolo];
-  const [youtubeId, setYoutubeId] = useState<string | null>("WvKuTS1mBmU");
-  const [currentYoutubeTime, setCurrentYoutubeTime] = useState<number>(0);
-  const [badVideos, addBadVideo] = useLocalStorageSet("badVideos");
-  const [showChordTones, setShowChordTones] = useState<boolean>(true);
-  const [isOverlay, setIsOverlay] = useState<boolean>(false);
-  const playerRef = useRef<YouTubePlayer>();
+  const [selectedSolo, setSelectedSolo] = useState(soloFromLocation);
+  const [selectedEra, setSelectedEra] = useState(() => eraForSolo(selectedSolo));
+  const [noteHeight, setNoteHeight] = useState<number>(PITCH_STEP);
+  const [timeSpacing, setTimeSpacing] = useState(DEFAULT_TIME_SPACING);
+  const [recoloring, setRecoloring] = useState<{ melid: number; changes: TonicChange[] }>();
+  const playback = useNotePlaybackClock();
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const compositionScroll = useRef<HTMLDivElement>(null);
 
-  const { style, title, performer, key, instrument, melid } =
-    solos[selectedSolo];
-
-  const youtubeItem = useMemo(() => {
-    return youtubeVideos[melid]?.filter(
-      ({ youtube_id }) => youtubeId === youtube_id
-    )?.[0];
-  }, [melid, youtubeId]);
+  const solo = solos[selectedSolo];
+  const { key, instrument, melid } = solo;
+  const fileName = makeFileName(solo);
+  const soloData = useSoloData(fileName);
+  const score = useMemo(() => soloData?.beats.length ? buildTonalScore(soloData.beats, soloData.melody, key) : undefined, [soloData, key]);
+  const audio = playbackBySolo[melid]?.audio;
+  const recording = weimarRecordings[melid];
+  const changes = recoloring?.melid === melid ? recoloring.changes : NO_CHANGES;
+  const heading = [instrumentName(instrument), recording?.recording_year].filter(Boolean).join(", ");
 
   useEffect(() => {
-    function updateCurrentTime() {
-      const time = playerRef?.current?.getCurrentTime();
-      if (typeof time === "number") {
-        setCurrentYoutubeTime(time - youtubeItem.solo_start_sec);
-      }
-      requestAnimationFrame(updateCurrentTime);
-    }
+    if (!window.location.hash) window.history.replaceState(window.history.state, "", soloLink(solos[INITIAL_SOLO].melid));
+    const navigate = () => {
+      const index = soloFromLocation();
+      setSelectedSolo(index);
+      setSelectedEra(eraForSolo(index));
+      setTimeSpacing(DEFAULT_TIME_SPACING);
+      setRecoloring(undefined);
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener("hashchange", navigate);
+    return () => window.removeEventListener("hashchange", navigate);
+  }, []);
 
-    const animationFrameId = requestAnimationFrame(updateCurrentTime);
+  useLayoutEffect(() => {
+    const list = compositionScroll.current;
+    const current = list?.querySelector("[aria-current]");
+    if (!list || !current) return;
+    const area = list.getBoundingClientRect();
+    const bounds = current.getBoundingClientRect();
+    if (bounds.top < area.top) list.scrollTop += bounds.top - area.top;
+    else if (bounds.bottom > area.bottom) list.scrollTop += bounds.bottom - area.bottom;
+  }, [selectedEra, selectedSolo]);
 
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [youtubeItem]);
-
-  const mergedBadVideos = useMemo(
-    () => new Set([...badVideos, ...BAD_VIDEOS]),
-    [badVideos, BAD_VIDEOS]
-  );
+  function seekRecording(scoreTime: number) {
+    const media = audioRef.current;
+    if (!audio || !media || !Number.isFinite(media.duration)) return;
+    const position = (scoreTime - audio.scoreStart) * audio.secondsPerScoreSecond;
+    media.currentTime = Math.min(media.duration, Math.max(0, position));
+  }
 
   return (
-    <>
-      <div style={{ position: "absolute", right: 20 }}>
-        <a href="https://github.com/vpavlenko/12" target="_blank">
-          <div className="octocat" />
-        </a>
-      </div>
-      <div style={{ columnCount: 4, columnGap: "20px", width: "100vw" }}>
-        {Object.entries(STYLES).map(([style_, years]) => (
-          <div
-            key={style_}
-            style={{ breakInside: "avoid", marginBottom: "20px" }}
-          >
-            <b>
-              {style_.toLowerCase()}, {years}:{" "}
-            </b>
-            <div>
-              {Object.entries(
-                solos.reduce<Record<string, JSX.Element[]>>(
-                  (
-                    acc,
-                    { title, solopart, performer, style, melid },
-                    soloIndex
-                  ) => {
-                    if (style === style_) {
-                      if (!acc[performer]) acc[performer] = [];
-                      const span = (
-                        <span
-                          key={soloIndex}
-                          style={{
-                            display: "inline",
-                            fontWeight:
-                              soloIndex === selectedSolo ? 700 : "normal",
-                            cursor: "pointer",
-                            ...(youtubeVideos[melid]?.filter(
-                              ({ youtube_id }) =>
-                                !mergedBadVideos.has(youtube_id)
-                            ).length > 0
-                              ? {}
-                              : {
-                                  textDecoration: "line-through",
-                                  color: "#d8d8d8",
-                                }),
-                          }}
-                          onClick={() => {
-                            setSelectedSolo(soloIndex);
-                            setYoutubeId(
-                              youtubeVideos[solos[soloIndex].melid]?.filter(
-                                ({ youtube_id }) =>
-                                  !mergedBadVideos.has(youtube_id)
-                              )?.[0].youtube_id
-                            );
-                          }}
-                        >
-                          {title}
-                          {solopart > 1 && ` (${solopart})`}
-                        </span>
-                      );
-                      acc[performer].push(
-                        isOverlay ? (
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={selectedOverlaidSolos.has(soloIndex)}
-                              onChange={(event) => {
-                                if (event.target.checked) {
-                                  setSelectedSolo(soloIndex);
-                                  setSelectedOverlaidSolos(
-                                    new Set([
-                                      ...selectedOverlaidSolos,
-                                      soloIndex,
-                                    ])
-                                  );
-                                } else {
-                                  setSelectedOverlaidSolos(
-                                    new Set(
-                                      [...selectedOverlaidSolos].filter(
-                                        (element) => element !== soloIndex
-                                      )
-                                    )
-                                  );
-                                }
-                              }}
-                            />
-                            {span}
-                          </label>
-                        ) : (
-                          span
-                        )
-                      );
-                    }
-                    return acc;
-                  },
-                  {}
-                )
-              ).map(([performer, titles], perfIndex) => (
-                <div
-                  key={perfIndex}
-                  style={{ paddingLeft: "3em", textIndent: "-3em" }}
-                >
-                  <span style={{ color: "#aaa" }}>{performer}: </span>
-                  {titles.reduce(
-                    (prev, curr, idx) => (
-                      <>
-                        {prev}
-                        {idx > 0 ? ", " : ""}
-                        <span style={{ whiteSpace: "nowrap" }}>{curr}</span>
-                      </>
-                    ),
-                    <></>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div style={{ marginTop: "40px", fontSize: 16 }}>
-        A {style.toLowerCase()} solo on{" "}
-        <span style={{ color: "darkorange", fontWeight: 700 }}>"{title}"</span>{" "}
-        by{" "}
-        <span style={{ color: "darkgreen", fontWeight: 700 }}>{performer}</span>{" "}
-        ({INSTRUMENTS[instrument as keyof typeof INSTRUMENTS]}) in {key}.
-        Youtube videos:{" "}
-        {youtubeVideos[melid]?.map(({ youtube_id }) => (
-          <Fragment key={youtube_id}>
-            <span
-              style={
-                mergedBadVideos.has(youtube_id)
-                  ? { color: "#d8d8d8", textDecoration: "line-through" }
-                  : youtubeId === youtube_id
-                  ? { fontWeight: 700 }
-                  : { borderBottom: "1px dotted gray", cursor: "pointer" }
-              }
+    <div className="solo-layout">
+      <aside className="composition-pane" aria-label="Compositions">
+        <div className="composition-eras" role="group" aria-label="Era">
+          {compositionGroups.map((era) => (
+            <button
+              key={era.style}
+              type="button"
+              aria-pressed={era === selectedEra}
+              aria-controls="composition-list"
               onClick={() => {
-                setYoutubeId(youtube_id);
+                setSelectedEra(era);
+                compositionScroll.current?.scrollTo(0, 0);
               }}
             >
-              {youtube_id}
-            </span>
-            {", "}
-          </Fragment>
-        ))}
-      </div>
-      <label>
-        <input
-          type="checkbox"
-          checked={showChordTones}
-          onChange={(event) => setShowChordTones(event.target.checked)}
-        />
-        Show Chord Tones
-      </label>
-      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      <label>
-        <input
-          type="checkbox"
-          checked={isOverlay}
-          onChange={(event) => setIsOverlay(event.target.checked)}
-        />
-        Overlay
-      </label>
-      {/* {beatsData && melodyData && (
-        <TonalGrid
-          beats={beatsData}
-          melody={melodyData}
-          key_={solos[selectedSolo].key}
-          currentYoutubeTime={currentYoutubeTime + 0.05}
-          measureWidth={25}
-          noteHeight={2}
-          mapToRelativeTime={mapToRelativeTime}
-          showChordTones={showChordTones}
-          isOverlay={isOverlay}
-        />
-      )} */}
-      {beatsData && melodyData && (
-        <TonalGrid
-          selectedSolo={selectedSolo}
-          selectedOverlaidSolos={selectedOverlaidSolos}
-          key_={solos[selectedSolo].key}
-          currentYoutubeTime={currentYoutubeTime + 0.05}
-          measureWidth={100}
-          noteHeight={6}
-          showChordTones={showChordTones}
-          isOverlay={isOverlay}
-        />
-      )}
-      {youtubeId && youtubeItem && (
-        <div style={{ position: "fixed", left: 0, bottom: 0 }}>
-          <YouTube
-            videoId={youtubeId}
-            opts={{
-              height: "100",
-              width: "1500",
-              playerVars: {
-                start: youtubeItem.solo_start_sec,
-                autoplay: 1,
-              },
-            }}
-            onReady={(event) => {
-              playerRef.current = event.target;
-              event.target.seekTo(youtubeItem.solo_start_sec, true);
-            }}
-            onError={() => addBadVideo(youtubeId)}
-          />
+              {era.label}
+            </button>
+          ))}
         </div>
-      )}
-      <div style={{ marginTop: 200 }}>
-        <CsvLoader
-          filePath={`csv_melody/${makeFileName(solos[selectedSolo])}`}
-          setData={(data) => (melodyStorage[selectedSolo] = data)}
-        />
-        <CsvLoader
-          filePath={`csv_beats/${makeFileName(solos[selectedSolo])}`}
-          setData={(data) => (beatsStorage[selectedSolo] = data)}
-        />
-      </div>
-    </>
+        <div className="composition-scroll" id="composition-list" ref={compositionScroll}>
+          {selectedEra.years && <b>{selectedEra.years}</b>}
+          <ul className="composition-performers" role="list">
+            {selectedEra.performers.map(([performer, entries]) => (
+              <li key={performer} className="composition-performer">
+                <span className="composition-performer-name">{performer}</span>
+                <ul className="composition-solos" role="list">
+                  {entries.map(({ solo, index }) => {
+                    const label = solo.solopart > 1 ? `${solo.title} (${solo.solopart})` : solo.title;
+                    return (
+                      <li key={solo.melid} className="composition-choice">
+                        <a
+                          href={soloLink(solo.melid)}
+                          aria-current={index === selectedSolo ? "true" : undefined}
+                        >
+                          {label}
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </aside>
+      <main className="solo-main">
+        <header className="solo-heading">
+          <div className="solo-title-row">
+            <div className="solo-title">{heading}</div>
+            <div className="solo-site-links">
+              <a href="https://rawl.rocks/" target="_blank" rel="noreferrer" aria-label="Rawl">
+                <img src={import.meta.env.BASE_URL + "rawl-favicon.svg"} alt="" width={20} height={20} />
+              </a>
+              <a href="https://github.com/vpavlenko/12" target="_blank" rel="noreferrer" aria-label="GitHub">
+                <span className="octocat" />
+              </a>
+            </div>
+          </div>
+        </header>
+        {score && <>
+          <TonalGrid
+            key={fileName}
+            score={score}
+            changes={changes}
+            onChangesChange={(next) => setRecoloring({ melid, changes: next })}
+            playback={playback}
+            noteHeight={noteHeight}
+            timeSpacing={timeSpacing}
+            onNoteHeightChange={setNoteHeight}
+            onTimeSpacingChange={setTimeSpacing}
+            onSeek={audio ? seekRecording : undefined}
+          />
+          {recording && <SoloMetadata key={melid} solo={solo} recording={recording} />}
+        </>}
+        <SoloPianoLegend key={fileName} tonicKey={key} />
+      </main>
+      <ScoreSizeSliders
+        noteHeight={noteHeight}
+        timeSpacing={timeSpacing}
+        onNoteHeightChange={setNoteHeight}
+        onTimeSpacingChange={setTimeSpacing}
+        keyboardShortcuts
+      />
+      {audio && <SoloAudio excerpt={audio} playback={playback} score={score} changes={changes} audioRef={audioRef} />}
+    </div>
   );
 }
 

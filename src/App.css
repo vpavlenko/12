@@ -13,64 +13,181 @@
   display: inline-block;
 }
 
-.noteColor_0_colors {
-  background-color: white !important;
+.solo-layout {
+  --solo-footer-clearance: calc(44px + var(--rawl-playback-footer-height, 25px) + env(safe-area-inset-bottom, 0px));
+  --rawln-piano-existing-clearance: var(--solo-footer-clearance);
+  display: grid;
+  grid-template-columns: clamp(138px, 16vw, 186px) minmax(0, 1fr);
+  align-items: start;
 }
 
-.noteColor_1_colors {
-  background-color: rgb(130, 0, 0) !important;
+.composition-pane {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: calc(100dvh - var(--rawl-playback-footer-height, 25px) - env(safe-area-inset-bottom, 0px));
 }
 
-.noteColor_1_colors:after, .noteColor_6_colors:after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 1px;
-  height: 1px;
-  background-color: white !important;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
+.composition-eras {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 10px 10px 4px;
 }
 
-.noteColor_2_colors {
-  background-color: red !important;
+.composition-eras button {
+  min-height: 28px;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #aaa;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.25;
 }
 
-.noteColor_3_colors {
-  background-color: #007000 !important;
+.composition-eras button:hover {
+  background: #292929;
+  color: #fff;
 }
 
-.noteColor_4_colors {
-  background-color: #00fb47 !important;
+.composition-eras button[aria-pressed="true"] {
+  background: #eee;
+  color: #111;
 }
 
-.noteColor_5_colors {
-  background-color: #df12ff !important;
+.composition-eras button:focus-visible {
+  outline-offset: 1px;
 }
 
-.noteColor_6_colors {
-  background-color: black !important;
-  box-shadow: 0 0 3px white, 0 0 6px white, 0 0 9px white;
+.solo-layout :is(.rawlp-footer, .rawln-size-sliders) :is(button, input):focus-visible {
+  outline-color: var(--focus-indicator);
 }
 
-.noteColor_7_colors {
-  background-color: rgb(120, 120, 120) !important;
+.composition-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 10px 12px;
+  overscroll-behavior: contain;
+  line-height: 1.25;
 }
 
-.noteColor_8_colors {
-  background-color: rgb(0, 0, 255) !important;
+.composition-performers,
+.composition-solos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
-.noteColor_9_colors {
-  background-color:  #03b9d5 !important;
+.composition-performers {
+  margin-top: 4px;
 }
 
-.noteColor_10_colors {
-  background-color: #ff7328 !important;
+.composition-performer {
+  overflow-wrap: anywhere;
 }
 
-.noteColor_11_colors {
-  background-color: #fffb00 !important;
+.composition-performer + .composition-performer {
+  margin-top: 4px;
 }
 
+.composition-performer-name {
+  display: block;
+  color: #aaa;
+}
+
+.composition-solos {
+  padding-inline-start: 0.9em;
+}
+
+.composition-choice {
+  display: flex;
+  align-items: flex-start;
+}
+
+.composition-choice a {
+  min-width: 0;
+  padding: 0 3px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.composition-choice a:hover {
+  color: #fff;
+}
+
+.composition-choice a:focus {
+  outline: none;
+}
+
+.composition-choice a:focus-visible {
+  outline: 1px solid var(--focus-indicator);
+  outline-offset: 1px;
+}
+
+.composition-choice a[aria-current] {
+  background: #eee;
+  color: #111;
+}
+
+.solo-main {
+  --solo-inline-padding: 20px;
+  min-width: 0;
+  padding: 14px var(--solo-inline-padding) var(--solo-footer-clearance);
+}
+
+.solo-main > .tonal-grid-container {
+  margin-right: calc(max(42px, 30px + env(safe-area-inset-right, 0px)) - var(--solo-inline-padding));
+}
+
+.solo-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px 14px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.solo-site-links {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.solo-site-links a { display: flex; }
+
+.solo-site-links img {
+  /* Match the octocat silhouette while retaining the favicon's original viewBox. */
+  transform: translateY(1px) scale(0.86);
+  transform-origin: center bottom;
+}
+
+.solo-title {
+  font-size: 16px;
+}
+
+@media (max-width: 680px) {
+  .solo-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .composition-pane {
+    position: static;
+    max-height: min(32dvh, 240px);
+  }
+
+  .solo-main {
+    --solo-inline-padding: 12px;
+  }
+}

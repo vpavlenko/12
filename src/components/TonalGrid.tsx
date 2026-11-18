@@ -1,280 +1,211 @@
-import { FC, useMemo } from "react";
-import styled from "styled-components";
-import { BeatsItem, MelodyItem, beatsStorage, melodyStorage } from "../App";
-import { Progression, Chord, Note, Collection } from "tonal";
+import { useLayoutEffect, useMemo, useRef } from "react";
+import { RawlNotation, useTonicRecoloring, type RawlNotationProps, type ScoreRow, type TonicChange } from "librawl";
+import { RomanNumeral, ScorePinchContent, useScorePinch } from "librawl/components";
+import { alignScoreRows, PITCH_STEP } from "librawl/geometry";
+import type { NotePlaybackClock } from "librawl/native";
+import "librawl/style.css";
+import "librawl/native.css";
+import "librawl/roman-numerals.css";
+import type { TonalScore } from "../tonalScore";
+import "./TonalGrid.css";
 
-const mod = (n: number, m: number): number => {
-  return ((n % m) + m) % m;
-};
+export const DEFAULT_TIME_SPACING = 25;
 
-const VerticalBar = styled.div`
-  width: 1px;
-  height: 100%;
-  position: absolute;
-  top: 0;
-  pointer-events: none;
-`;
+function stackedRows(score: TonalScore, separatePickup: boolean) {
+  const starts = [0, ...score.chorusStarts.filter((start) => start > 0 && (separatePickup || start !== score.firstChorus))];
+  return starts.map((start, index) => {
+    const end = starts[index + 1] ?? score.end;
+    const anchor = !separatePickup && index === 0 ? score.firstChorus ?? start : start;
+    return { start, end, anchor };
+  });
+}
 
-const Cursor = styled(VerticalBar)`
-  background-color: orange;
-  pointer-events: none;
-  z-index: 1;
-`;
+const percentOf = (row: ScoreRow, beat: number) => `${(beat - row.start) / (row.end - row.start) * 100}%`;
 
-const BeatBar = styled(VerticalBar)`
-  border-left: 1px dashed #262626;
-`;
+function harmonyInRow(score: TonalScore, row: ScoreRow) {
+  return score.harmony.flatMap((harmony) => {
+    const start = Math.max(harmony.start, row.start);
+    const end = Math.min(harmony.end, row.end);
+    return start < end ? [{ ...harmony, start }] : [];
+  });
+}
 
-const KEYS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+function placeChordLabels(anchors: number[], widths: number[], gap: number, available: number) {
+  let end = 0;
+  const offsets = widths.map((width) => {
+    const offset = end;
+    end += width + gap;
+    return offset;
+  });
+  const slack = Math.max(0, available - end + gap);
+  const runs: { start: number; end: number; mean: number }[] = [];
+  const positions = [...offsets];
 
-const Measure: FC<{ number: number; left: number; measureWidth: number }> = ({
-  number,
-  left,
-  measureWidth,
-}) => {
-  const isFullSize = measureWidth > 30;
-
-  const backgroundColor =
-    mod(number, 12) === 1 ? "#a0f" : mod(number, 4) === 1 ? "#aaa" : "#444";
-
-  return (
-    <>
-      <VerticalBar
-        style={{
-          left,
-          backgroundColor,
-        }}
-      />
-      {isFullSize &&
-        [1, 2, 3].map((beat) => (
-          <BeatBar style={{ left: left + (beat * measureWidth) / 4 }} />
-        ))}
-      {isFullSize && (
-        <div
-          style={{
-            position: "absolute",
-            left: left + 5,
-            top: 20,
-            color: "white",
-          }}
-        >
-          {number}
-        </div>
-      )}
-    </>
-  );
-};
-
-const TonalGrid: FC<{
-  selectedSolo: number;
-  selectedOverlaidSolos: Set<number>;
-  key_: string;
-  currentYoutubeTime: number;
-  measureWidth: number;
-  noteHeight: number;
-  showChordTones: boolean;
-  isOverlay: boolean;
-}> = ({
-  selectedSolo,
-  selectedOverlaidSolos,
-  key_,
-  currentYoutubeTime,
-  measureWidth,
-  noteHeight,
-  showChordTones,
-  isOverlay,
-}) => {
-  const beats = beatsStorage[selectedSolo];
-  const melody = melodyStorage[selectedSolo];
-
-  const mapToRelativeTime = useMemo(() => {
-    const barOnsets: { [key: number]: number } = {};
-    beats?.forEach(({ bar, beat, onset }) => {
-      if (beat === 1) {
-        barOnsets[bar] = onset;
-      }
-    });
-    return beats
-      ? (absoluteTime: number) => {
-          const firstBar = isOverlay ? 0 : beats[0].bar;
-          for (const iAsString in barOnsets) {
-            const i = parseInt(iAsString, 10);
-            if (!(i - 1 in barOnsets)) {
-              continue;
-            }
-            if (absoluteTime <= barOnsets[i]) {
-              const relativeTime =
-                i -
-                2 +
-                (absoluteTime - barOnsets[i - 1]) /
-                  (barOnsets[i] - barOnsets[i - 1]);
-              if (isOverlay && relativeTime < -1) {
-                return -10;
-              }
-              return (
-                (isOverlay ? relativeTime % 12 : relativeTime) - firstBar + 2
-              );
-            }
-          }
-          return -10;
-        }
-      : () => 0;
-  }, [beats, isOverlay]);
-
-  const startBar = beats[0].bar;
-  const endBar = beats.at(-1)!.bar;
-  const measures = Collection.range(startBar, endBar);
-
-  const tonicName = key_ ? key_.split("-")[0] : KEYS[0];
-  const tonic = KEYS.indexOf(tonicName);
-
-  const melodyMidiNumbers = melody.map(({ pitch }) => pitch);
-
-  const minMidiNumber = Math.min(...melodyMidiNumbers);
-  const minOctave = Note.octave(Note.fromMidi(minMidiNumber))!;
-  const minPitch = minMidiNumber - 2;
-
-  const maxMidiNumber = Math.max(...melodyMidiNumbers);
-  const maxOctave = Note.octave(Note.fromMidi(maxMidiNumber))!;
-  const maxPitch = maxMidiNumber + 6;
-
-  const octaves = Collection.range(minOctave, maxOctave)
-    .map((octave) => Note.midi(tonicName + octave)!)
-    .filter(
-      (midiNumber) => midiNumber >= minMidiNumber && midiNumber <= maxPitch - 4
-    ) // TODO: why -4? compare with maxMidiNumber instead?
-    .map((midiNumber) => (
-      <div
-        key={`tonalgrid_octave_${midiNumber}`}
-        style={{
-          position: "absolute",
-          width: "100%",
-          height: 6 * noteHeight,
-          left: 0,
-          bottom: (midiNumber - minPitch) * noteHeight,
-          pointerEvents: "none",
-          background: `linear-gradient(to top, #222, transparent)`,
-          zIndex: 0,
-        }}
-      />
-    ));
-
-  const chordTones: Array<{ onset: number; chordNotes: number[] }> = [];
-  if (showChordTones) {
-    beats.forEach(({ chord, onset }) => {
-      if (chord === "NC" || chord == null) {
-        return;
-      }
-      const chordNotes = Collection.range(minOctave, maxOctave)
-        .flatMap((octave) =>
-          Chord.notes(chord).map((noteName) => Note.midi(noteName + octave)!)
-        )
-        .filter(
-          (midiNumber) =>
-            midiNumber >= minMidiNumber && midiNumber <= maxMidiNumber
-        );
-
-      chordTones.push({ chordNotes, onset });
-    });
+  // Merge overlapping runs so each label stays as close as possible to its anchor.
+  anchors.forEach((anchor, index) => {
+    let run = { start: index, end: index + 1, mean: anchor - offsets[index] };
+    while (runs.length && runs[runs.length - 1].mean > run.mean) {
+      const previous = runs.pop()!;
+      const sum = previous.mean * (previous.end - previous.start) + run.mean * (run.end - run.start);
+      run = { start: previous.start, end: run.end, mean: sum / (run.end - previous.start) };
+    }
+    runs.push(run);
+  });
+  for (const { start, end, mean } of runs) {
+    const shift = Math.max(0, Math.min(slack, mean));
+    for (let index = start; index < end; index++) positions[index] += shift;
   }
+  return positions;
+}
+
+function HarmonyHeader({ score, row }: { score: TonalScore; row: ScoreRow }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const chords = useMemo(() => harmonyInRow(score, row), [score, row]);
+  useLayoutEffect(() => {
+    const header = ref.current!;
+    const labels = Array.from(header.children) as HTMLElement[];
+    const arrange = () => {
+      const width = header.clientWidth;
+      if (!width || !labels.length) return;
+      const gap = 4;
+      const anchors = labels.map((label) => label.offsetLeft);
+      const widths = labels.map((label) => label.offsetWidth + 1);
+      const preferredWidth = widths.reduce((total, next) => total + next) + (widths.length - 1) * gap;
+      const scale = Math.min(1, width / preferredWidth);
+      const positions = placeChordLabels(anchors, widths.map((value) => value * scale), gap * scale, width);
+      labels.forEach((label, index) => {
+        label.style.transform = `translateX(${positions[index] - anchors[index]}px) scale(${scale})`;
+      });
+    };
+    arrange();
+    const observer = new ResizeObserver(arrange);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [chords]);
 
   return (
-    <div
-      style={{
-        position: "relative",
-        width: (measures.length + 1) * measureWidth,
-        height: (maxPitch - minPitch + 1) * noteHeight,
-        backgroundColor: "black",
-        marginTop: "20px",
-        marginBottom: "20px",
-      }}
-    >
-      {currentYoutubeTime !== -10 &&
-        currentYoutubeTime != null &&
-        !isNaN(currentYoutubeTime) && (
-          <Cursor
-            style={{
-              left: mapToRelativeTime(currentYoutubeTime) * measureWidth,
-            }}
-          />
-        )}
-      {!showChordTones && octaves}
-      {beats
-        .filter(({ beat }) => beat === 1)
-        .map(({ bar, onset }) => (
-          <>
-            <Measure
-              key={bar}
-              number={bar}
-              left={mapToRelativeTime(onset) * measureWidth}
-              measureWidth={measureWidth}
-            />
-          </>
-        ))}
-      {melody.map(({ pitch, onset, duration }, index) =>
-        isNaN(pitch) ? null : (
-          <div
-            key={index}
-            className={`noteColor_${(pitch - tonic) % 12}_colors`}
-            style={{
-              position: "absolute",
-              width:
-                (mapToRelativeTime(onset + duration) -
-                  mapToRelativeTime(onset)) *
-                measureWidth,
-              height: noteHeight * 2,
-              bottom: (pitch - minPitch) * noteHeight,
-              left: mapToRelativeTime(onset) * measureWidth,
-              borderRadius: "5px",
-              zIndex: 10,
-              opacity: isOverlay ? 0.7 : 1,
-            }}
-          />
-        )
-      )}
-      {chordTones.flatMap(({ chordNotes, onset }, index) =>
-        chordNotes.map((midiNumber) => (
-          <div
-            key={`chord_tone_${index}_${midiNumber}`}
-            className={`noteColor_${(midiNumber - tonic) % 12}_colors`}
-            style={{
-              position: "absolute",
-              width:
-                index + 1 < chordTones.length
-                  ? (mapToRelativeTime(chordTones[index + 1].onset) -
-                      mapToRelativeTime(chordTones[index].onset)) *
-                    measureWidth
-                  : measureWidth,
-              height: noteHeight * 2,
-              bottom: (midiNumber - minPitch) * noteHeight,
-              left: mapToRelativeTime(onset) * measureWidth,
-              zIndex: 9,
-              opacity: "20%",
-            }}
-          />
-        ))
-      )}
-      {measureWidth > 30 &&
-        beats
-          .filter(({ chord }) => chord)
-          .map(({ onset, chord }, index) => {
-            return (
-              <div
-                key={index}
-                style={{
-                  position: "absolute",
-                  left: mapToRelativeTime(onset) * measureWidth + 5,
-                  color: "yellow",
-                }}
-              >
-                {Progression.toRomanNumerals(key_.split("-")[0], [
-                  chord,
-                ])[0].replace("m7b5", "ø")}
-              </div>
-            );
-          })}
+    <div className="tonal-grid-harmony" ref={ref} style={row.style}>
+      {chords.map(({ start, label, rootPitch, bassPitch, tooltip }) => (
+        <div className="tonal-grid-chord" key={start} style={{ left: `calc(${percentOf(row, start)} + 5px)` }}>
+          <RomanNumeral notation={label} options={{ jazz: true, font: "sans-serif", rootPitch, bassPitch }} tooltip={tooltip ?? true} />
+        </div>
+      ))}
     </div>
   );
+}
+
+function syncHorizontalScroll(scrollLeft: number, target: HTMLDivElement | null) {
+  if (target && target.scrollLeft !== scrollLeft) target.scrollLeft = scrollLeft;
+}
+
+type Props = {
+  score: TonalScore;
+  changes: TonicChange[];
+  onChangesChange: (changes: TonicChange[]) => void;
+  playback: NotePlaybackClock;
+  noteHeight: number;
+  timeSpacing: number;
+  onNoteHeightChange: (height: number) => void;
+  onTimeSpacingChange: (spacing: number) => void;
+  onSeek?: (scoreTime: number) => void;
 };
 
-export default TonalGrid;
+type SectionProps = Pick<Props, "score" | "noteHeight" | "timeSpacing" | "onNoteHeightChange" | "onTimeSpacingChange"> & {
+  rows: ScoreRow[];
+  scoreWidth: string;
+  stickyHarmony?: boolean;
+  notation: RawlNotationProps;
+};
+
+function ScoreSection({
+  score, rows, scoreWidth, stickyHarmony, notation,
+  noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange,
+}: SectionProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const harmonyViewportRef = useRef<HTMLDivElement>(null);
+  const harmonyContentRef = useRef<HTMLDivElement>(null);
+  const pinchActive = useScorePinch(containerRef, noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange);
+
+  useLayoutEffect(() => {
+    const scoreContent = containerRef.current?.querySelector<HTMLElement>("[data-score-pinch-content]");
+    const harmonyContent = harmonyContentRef.current;
+    if (!scoreContent || !harmonyContent) return;
+    const syncPreview = () => {
+      const { transform, transformOrigin } = scoreContent.style;
+      harmonyContent.style.transform = transform ? `scaleX(${new DOMMatrixReadOnly(transform).a})` : "";
+      harmonyContent.style.transformOrigin = transformOrigin;
+    };
+    const observer = new MutationObserver(syncPreview);
+    observer.observe(scoreContent, { attributes: true, attributeFilter: ["style"] });
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div className="tonal-grid-section">
+      <div
+        className={stickyHarmony ? "tonal-grid-harmony-viewport tonal-grid-sticky-harmony" : "tonal-grid-harmony-viewport"}
+        ref={harmonyViewportRef}
+        onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft, containerRef.current)}
+      >
+        <div ref={harmonyContentRef} style={{ width: scoreWidth }}>
+          <HarmonyHeader score={score} row={rows[0]} />
+        </div>
+      </div>
+      <div
+        className="tonal-grid-scroll"
+        ref={containerRef}
+        onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft, harmonyViewportRef.current)}
+      >
+        <ScorePinchContent activeRef={pinchActive} fitWidth>
+          <RawlNotation
+            {...notation}
+            className="tonal-grid"
+            style={{ width: scoreWidth }}
+            rows={rows}
+          />
+        </ScorePinchContent>
+      </div>
+    </div>
+  );
+}
+
+export default function TonalGrid({
+  changes, onChangesChange, playback, onSeek, ...sizing
+}: Props) {
+  const { score, noteHeight } = sizing;
+  const separatePickup = score.hasLongPickup && score.firstChorus !== undefined && score.firstChorus < score.end;
+  const [pickup, choruses] = useMemo(() => {
+    const rows = stackedRows(score, separatePickup);
+    return separatePickup
+      ? [alignScoreRows(rows.slice(0, 1)), alignScoreRows(rows.slice(1))]
+      : [undefined, alignScoreRows(rows)];
+  }, [score, separatePickup]);
+  const longestSection = Math.max(pickup?.width ?? 0, choruses.width);
+  const zoom = sizing.timeSpacing / DEFAULT_TIME_SPACING;
+  const scoreWidth = (duration: number) => `${100 * (duration / longestSection) * zoom}%`;
+  const recoloring = useTonicRecoloring({ changes, onChange: onChangesChange, measureMap: score.measures });
+  const phraseStarts = useMemo(() => score.terminalBar === undefined
+    ? score.phraseStarts : [...score.phraseStarts, score.terminalBar], [score]);
+  const seek = (position: number) => (onSeek ?? playback.advance)(score.origin + position);
+  const notation: RawlNotationProps = {
+    beats: score.end,
+    notes: score.notes,
+    tonic: score.tonic,
+    measureMap: score.measures,
+    phraseStarts,
+    playbackClock: playback,
+    changes: recoloring.changes,
+    selectedMeasure: recoloring.selectedMeasure,
+    onMeasureSelect: recoloring.selectMeasure,
+    onNoteHover: recoloring.hoverNote,
+    onSeek: seek,
+    onNote: recoloring.selectedMeasure === null ? undefined : recoloring.chooseNote,
+    noteScale: noteHeight / PITCH_STEP,
+  };
+
+  return (
+    <div className="tonal-grid-container">
+      {pickup && <ScoreSection {...sizing} rows={pickup.rows} scoreWidth={scoreWidth(pickup.width)} notation={notation} />}
+      <ScoreSection {...sizing} rows={choruses.rows} scoreWidth={scoreWidth(choruses.width)} notation={notation} stickyHarmony />
+    </div>
+  );
+}

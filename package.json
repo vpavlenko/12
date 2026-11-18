@@ -11,19 +11,16 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "librawl": "file:vendor/librawl-0.3.5-local-49143d1d5dc8.tgz",
     "papaparse": "^5.4.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-youtube": "^10.1.0",
-    "styled-components": "^6.1.8",
-    "tonal": "^6.0.0",
-    "usehooks-ts": "^2.15.1"
+    "tonal": "^6.0.0"
   },
   "devDependencies": {
     "@types/papaparse": "^5.3.14",
     "@types/react": "^18.2.56",
     "@types/react-dom": "^18.2.19",
-    "@types/youtube-player": "^5.5.11",
     "@typescript-eslint/eslint-plugin": "^7.0.2",
     "@typescript-eslint/parser": "^7.0.2",
     "@vitejs/plugin-react": "^4.2.1",

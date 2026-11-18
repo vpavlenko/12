@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local librawl pack history. Force-add the archive pinned in package.json.
+/vendor/librawl-*.tgz
