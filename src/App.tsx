@@ -15,9 +15,11 @@ import { PITCH_STEP } from "librawl/geometry";
 import "librawl/score-size-sliders.css";
 import Papa from "papaparse";
 import TonalGrid, { DEFAULT_TIME_SPACING } from "./components/TonalGrid";
+import { AnalysisIcon } from "./components/SoloAnalysis";
 import { SoloAudio, type AudioExcerpt } from "./components/SoloPlayback";
 import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
+import { getSoloAnalysis } from "./soloAnalysis";
 import { buildTonalScore, type BeatsItem, type MelodyItem } from "./tonalScore";
 import { instrumentName, weimarRecordings, type JazzSolo } from "./weimar";
 
@@ -221,6 +223,7 @@ function App() {
                           aria-current={index === selectedSolo ? "true" : undefined}
                         >
                           {label}
+                          {getSoloAnalysis(solo.melid).length > 0 && <AnalysisIcon />}
                         </a>
                       </li>
                     );
@@ -249,6 +252,7 @@ function App() {
           <TonalGrid
             key={fileName}
             score={score}
+            analysis={getSoloAnalysis(melid)}
             changes={changes}
             onChangesChange={(next) => setRecoloring({ melid, changes: next })}
             playback={playback}
