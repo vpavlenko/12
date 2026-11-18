@@ -130,7 +130,7 @@ function App() {
   const [timeSpacing, setTimeSpacing] = useState(DEFAULT_TIME_SPACING);
   const [recoloring, setRecoloring] = useState<{ melid: number; changes: TonicChange[] }>();
   const notePlayback = useNotePlaybackClock();
-  const playbackPosition = useRef<(time?: number) => void>();
+  const playbackPosition = useRef<((time?: number) => void) | undefined>(undefined);
   const playback = useMemo(() => ({
     register: notePlayback.register,
     advance(time: number) {

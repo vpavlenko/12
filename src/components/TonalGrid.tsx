@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { RawlNotation, useTonicRecoloring, type RawlNotationProps, type ScoreRow, type TonicChange } from "librawl";
 import { RomanNumeral, ScorePinchContent, useScorePinch } from "librawl/components";
 import { alignScoreRows, PITCH_STEP } from "librawl/geometry";
@@ -58,7 +58,7 @@ function placeChordLabels(anchors: number[], widths: number[], gap: number, avai
   return positions;
 }
 
-type PlaybackPosition = MutableRefObject<((time?: number) => void) | undefined>;
+type PlaybackPosition = RefObject<((time?: number) => void) | undefined>;
 
 function HarmonyHeader({ score, row, playbackPosition }: {
   score: TonalScore;

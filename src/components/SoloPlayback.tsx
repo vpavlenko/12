@@ -16,7 +16,7 @@ type SoloAudioProps = {
   playback: NotePlaybackClock;
   score?: TonalScore;
   changes: TonicChange[];
-  audioRef: RefObject<HTMLAudioElement>;
+  audioRef: RefObject<HTMLAudioElement | null>;
 };
 
 type MediaState = {

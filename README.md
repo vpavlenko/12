@@ -36,10 +36,9 @@ changes, converted to the excerpt's clock.
 
 The roll, Roman numeral tooltips, Piano Legend, size sliders, and fixed
 playback bar use librawl.
-The vendored package is based on v0.3.5 with a
-[source patch](vendor/librawl-roll.patch) for these components, annotated beat
-positions, and recording-time playback spans. This app owns the audio element and maps
-its clock to the score and playback thumb. The sliders sit in the lower-right
+The app runs on React 19 and pins a built librawl archive under `vendor/`.
+It owns the audio element and maps its clock to the score and playback thumb
+using annotated beat positions and recording-time playback spans. The sliders sit in the lower-right
 corner. Use A/D to adjust time spacing and W/S to adjust note height.
 The Piano Legend uses the credited [Salamander piano samples](public/piano/NOTICE.txt).
 
