@@ -172,16 +172,24 @@ export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: s
   const transcribed = melody.filter(({ pitch, onset, duration }) =>
     Number.isFinite(pitch) && Number.isFinite(onset) && Number.isFinite(duration) && duration > EPSILON);
   const firstNote = transcribed.reduce((time, note) => Math.min(time, note.onset), Infinity);
+  const lastNoteEnd = transcribed.reduce((time, note) => Math.max(time, note.onset + note.duration), -Infinity);
   const firstRenderedBeat = firstRenderedBeatIndex(beats, firstNote);
   const renderedBeats = beats.slice(firstRenderedBeat);
   const origin = Math.min(firstNote, renderedBeats[0].onset);
   const lastBeat = beats[beats.length - 1];
-  const endTime = transcribed.reduce((time, note) => Math.max(time, note.onset + note.duration), lastBeat.onset);
-  const end = endTime - origin;
+  const recordedEndTime = Math.max(lastNoteEnd, lastBeat.onset);
+  const recordedMeasures = buildMeasures(renderedBeats, origin, recordedEndTime);
+  const lastBar = recordedMeasures[recordedMeasures.length - 1]?.sourceNumber ?? 0;
+  const lastFullChorusBar = Math.floor(lastBar / 12) * 12;
+  // Keep complete choruses and any later measures reached by a sounding note.
+  const trailingRest = lastFullChorusBar >= 12 && transcribed.length > 0
+    ? recordedMeasures.findIndex(({ sourceNumber, start }) => sourceNumber > lastFullChorusBar && start >= lastNoteEnd - origin)
+    : -1;
+  const end = trailingRest < 0 ? recordedEndTime - origin : recordedMeasures[trailingRest].start;
+  const measures = trailingRest < 0 ? recordedMeasures : recordedMeasures.slice(0, trailingRest);
   const notes: TimedNote[] = transcribed.map(({ pitch, onset, duration }, index) => ({
     id: String(index), pitch, start: onset - origin, duration, voice: 0, playbackSpan: [onset, onset + duration],
   }));
-  const measures = buildMeasures(renderedBeats, origin, endTime);
   const lastNoteStart = notes.reduce((last, note) => Math.max(last, note.start), 0);
   const phraseStarts = measures.filter(({ sourceNumber }) => (sourceNumber - 1) % 4 === 0)
     .map(({ start }) => start);
@@ -190,8 +198,8 @@ export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: s
     .map(({ start }) => start);
   const firstChorus = measures.find(({ sourceNumber }) => sourceNumber === 1)?.start;
   const hasLongPickup = measures.filter(({ sourceNumber }) => sourceNumber < 1).length > 1;
-  const terminalBar = lastBeat.beat === 1 && lastBeat.onset === endTime ? end : undefined;
-  const symbols = beats.flatMap(({ chord, onset }) => chord ? [{ chord, start: onset - origin }] : []);
+  const terminalBar = trailingRest >= 0 || (lastBeat.beat === 1 && lastBeat.onset === recordedEndTime) ? end : undefined;
+  const symbols = beats.flatMap(({ chord, onset }) => chord && onset - origin < end ? [{ chord, start: onset - origin }] : []);
   const harmony = symbols.flatMap(({ chord, start }, index) => {
     if (chord === "NC") return [];
     const stop = symbols[index + 1]?.start ?? end;
