@@ -6,7 +6,7 @@ import type { NotePlaybackClock } from "librawl/native";
 import "librawl/style.css";
 import "librawl/native.css";
 import "librawl/roman-numerals.css";
-import { pickupProgressAt, type TonalScore } from "../tonalScore";
+import { countInProgressAt, type TonalScore } from "../tonalScore";
 import "./TonalGrid.css";
 
 export const DEFAULT_TIME_SPACING = 25;
@@ -68,14 +68,14 @@ function HarmonyHeader({ score, row, playbackPosition }: {
   const ref = useRef<HTMLDivElement>(null);
   const progressLine = useRef<HTMLDivElement>(null);
   const chords = useMemo(() => harmonyInRow(score, row), [score, row]);
-  const hasPickupProgress = !!playbackPosition && score.pickupProgress.length > 0;
+  const hasCountIn = !!playbackPosition && score.countInProgress.length > 0;
 
   useLayoutEffect(() => {
     const line = progressLine.current;
     if (!playbackPosition || !line) return;
     const rowDuration = row.end - row.start;
     playbackPosition.current = (time) => {
-      const progress = time === undefined ? undefined : pickupProgressAt(score.pickupProgress, time);
+      const progress = time === undefined ? undefined : countInProgressAt(score, time);
       if (!progress || progress.start < row.start || progress.end > row.end) {
         if (!line.hidden) line.hidden = true;
         return;
@@ -86,7 +86,7 @@ function HarmonyHeader({ score, row, playbackPosition }: {
       if (line.hidden) line.hidden = false;
     };
     return () => { playbackPosition.current = undefined; };
-  }, [playbackPosition, row, score.pickupProgress]);
+  }, [playbackPosition, row, score]);
 
   useLayoutEffect(() => {
     const header = ref.current!;
@@ -111,8 +111,8 @@ function HarmonyHeader({ score, row, playbackPosition }: {
   }, [chords]);
 
   return (
-    <div className={hasPickupProgress ? "tonal-grid-harmony tonal-grid-harmony-count-in" : "tonal-grid-harmony"} ref={ref} style={row.style}>
-      {hasPickupProgress && <div className="tonal-grid-count-in" ref={progressLine} aria-hidden="true" hidden />}
+    <div className={hasCountIn ? "tonal-grid-harmony tonal-grid-harmony-count-in" : "tonal-grid-harmony"} ref={ref} style={row.style}>
+      {hasCountIn && <div className="tonal-grid-count-in" ref={progressLine} aria-hidden="true" hidden />}
       {chords.map(({ start, label, rootPitch, bassPitch, tooltip }) => (
         <div className="tonal-grid-chord" key={start} style={{ left: `calc(${percentOf(row, start)} + 5px)` }}>
           <RomanNumeral notation={label} options={{ jazz: true, font: "sans-serif", rootPitch, bassPitch }} tooltip={tooltip ?? true} />

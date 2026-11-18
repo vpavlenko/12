@@ -54,42 +54,78 @@ function buildMeasures(beats: BeatsItem[], origin: number, endTime: number) {
   return measures;
 }
 
-function buildPickupProgress(beats: BeatsItem[], measures: Measure[], origin: number) {
-  const firstSoloBeat = beats.findIndex(({ bar }) => bar === 1);
-  if (firstSoloBeat <= 0) return [];
+function firstRenderedBeatIndex(beats: BeatsItem[], firstNote: number) {
+  let start = 0;
+  for (let index = 1; index < beats.length; index++) {
+    if (beats[start].bar >= 1 || beats[index].onset > firstNote) break;
+    if (beats[index].bar !== beats[start].bar) start = index;
+  }
+  return start;
+}
+
+function buildCountInProgress(
+  beats: BeatsItem[], measures: Measure[], origin: number, firstRenderedBeat: number, audioStart: number,
+) {
+  if (audioStart >= origin) return [];
 
   const chorusBeats = new Map<number, Map<number, number>>();
-  for (let index = firstSoloBeat; index < beats.length && beats[index].bar <= 12; index++) {
-    const { bar, beat, onset } = beats[index];
+  for (const { bar, beat, onset } of beats) {
+    if (bar < 1) continue;
+    if (bar > 12) break;
     const positions = chorusBeats.get(bar) ?? new Map<number, number>();
     positions.set(beat, onset - origin);
     chorusBeats.set(bar, positions);
   }
 
+  const firstBeat = beats[0];
+  const openingIntervals = beats.slice(1, 5).map(({ onset }, index) => onset - beats[index].onset)
+    .filter((duration) => duration > EPSILON).sort((a, b) => a - b);
+  const beatDuration = openingIntervals[Math.floor(openingIntervals.length / 2)];
+  const beatsPerBar = parseInt(beats.find(({ signature }) => signature)?.signature ?? "4", 10);
+  const inferredBeats: Pick<BeatsItem, "bar" | "beat" | "onset">[] = [];
+  let { bar, beat, onset } = firstBeat;
+  // Keep recorded beats in the trimmed pickup. Estimate only the earlier,
+  // unannotated audio using the opening tempo and known bar and beat.
+  if (beatDuration && beatsPerBar > 0) {
+    while (onset > audioStart || beat > 1) {
+      if (--beat === 0) {
+        bar--;
+        beat = beatsPerBar;
+      }
+      onset -= beatDuration;
+      inferredBeats.push({ bar, beat, onset });
+    }
+  }
+  const leadIn = [...inferredBeats.reverse(), ...beats.slice(0, firstRenderedBeat + 1)];
+
   const progress: PickupBeat[][] = [];
   let index = 0;
-  while (index < firstSoloBeat) {
-    const { bar } = beats[index];
-    const targetBar = mod(bar - 1) + 1;
+  while (index < leadIn.length - 1) {
+    const { bar: sourceBar } = leadIn[index];
+    const targetBar = mod(sourceBar - 1) + 1;
     const targetMeasure = measures.find(({ sourceNumber }) => sourceNumber === targetBar);
     const targetBeats = chorusBeats.get(targetBar);
     const points: PickupBeat[] = [];
-    while (index < firstSoloBeat && beats[index].bar === bar) {
-      const { beat, onset } = beats[index++];
+    while (index < leadIn.length - 1 && leadIn[index].bar === sourceBar) {
+      const { beat, onset } = leadIn[index++];
       const position = targetBeats?.get(beat);
       if (position !== undefined) points.push({ time: onset, position });
     }
-    if (targetMeasure && points.length) {
-      // An incomplete target bar only has positions through its recorded end.
-      points.push({ time: beats[index].onset, position: targetMeasure.start + targetMeasure.duration });
+    const nextBeat = leadIn[index];
+    if (targetMeasure && points.length && nextBeat.onset > audioStart) {
+      const nextPosition = nextBeat.bar === sourceBar ? targetBeats?.get(nextBeat.beat) : undefined;
+      points.push({
+        time: nextBeat.onset, position: nextPosition ?? targetMeasure.start + targetMeasure.duration,
+      });
       progress.push(points);
     }
   }
   return progress;
 }
 
-export function pickupProgressAt(bars: PickupBeat[][], time: number) {
-  const bar = bars.find((points) => time >= points[0].time && time < points[points.length - 1].time);
+export function countInProgressAt(score: TonalScore, time: number) {
+  if (time >= score.origin) return;
+  const bar = score.countInProgress.find((points) => time >= points[0].time && time < points[points.length - 1].time);
   if (!bar) return;
   const nextIndex = bar.findIndex((point) => time < point.time);
   const previous = bar[nextIndex - 1];
@@ -130,19 +166,22 @@ function chordNotation(symbol: string, tonicName: string, tonic: number) {
   };
 }
 
-export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: string) {
+export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: string, audioStart?: number) {
   const tonicName = key.split("-")[0] || "C";
   const tonic = Note.chroma(tonicName) ?? 0;
   const transcribed = melody.filter(({ pitch, onset, duration }) =>
     Number.isFinite(pitch) && Number.isFinite(onset) && Number.isFinite(duration) && duration > EPSILON);
-  const origin = transcribed.reduce((time, note) => Math.min(time, note.onset), beats[0].onset);
+  const firstNote = transcribed.reduce((time, note) => Math.min(time, note.onset), Infinity);
+  const firstRenderedBeat = firstRenderedBeatIndex(beats, firstNote);
+  const renderedBeats = beats.slice(firstRenderedBeat);
+  const origin = Math.min(firstNote, renderedBeats[0].onset);
   const lastBeat = beats[beats.length - 1];
   const endTime = transcribed.reduce((time, note) => Math.max(time, note.onset + note.duration), lastBeat.onset);
   const end = endTime - origin;
   const notes: TimedNote[] = transcribed.map(({ pitch, onset, duration }, index) => ({
     id: String(index), pitch, start: onset - origin, duration, voice: 0, playbackSpan: [onset, onset + duration],
   }));
-  const measures = buildMeasures(beats, origin, endTime);
+  const measures = buildMeasures(renderedBeats, origin, endTime);
   const lastNoteStart = notes.reduce((last, note) => Math.max(last, note.start), 0);
   const phraseStarts = measures.filter(({ sourceNumber }) => (sourceNumber - 1) % 4 === 0)
     .map(({ start }) => start);
@@ -159,8 +198,9 @@ export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: s
     return stop - start > EPSILON ? [{ ...chordNotation(chord, tonicName, tonic), start, end: stop }] : [];
   });
 
-  const pickupProgress = buildPickupProgress(beats, measures, origin);
-  return { notes, measures, tonic, end, origin, harmony, chorusStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, pickupProgress };
+  const countInProgress = audioStart === undefined ? []
+    : buildCountInProgress(beats, measures, origin, firstRenderedBeat, audioStart);
+  return { notes, measures, tonic, end, origin, harmony, chorusStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, countInProgress };
 }
 
 export type TonalScore = ReturnType<typeof buildTonalScore>;

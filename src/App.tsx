@@ -149,8 +149,10 @@ function App() {
   const { key, instrument, melid } = solo;
   const fileName = makeFileName(solo);
   const soloData = useSoloData(fileName);
-  const score = useMemo(() => soloData?.beats.length ? buildTonalScore(soloData.beats, soloData.melody, key) : undefined, [soloData, key]);
   const audio = playbackBySolo[melid]?.audio;
+  const score = useMemo(() => soloData?.beats.length
+    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart)
+    : undefined, [soloData, key, audio?.scoreStart]);
   const recording = weimarRecordings[melid];
   const changes = recoloring?.melid === melid ? recoloring.changes : NO_CHANGES;
   const heading = [instrumentName(instrument), recording?.recording_year].filter(Boolean).join(", ");
