@@ -43,6 +43,21 @@ its clock to the score and playback thumb. The sliders sit in the lower-right
 corner. Use A/D to adjust time spacing and W/S to adjust note height.
 The Piano Legend uses the credited [Salamander piano samples](public/piano/NOTICE.txt).
 
+## Expressive MIDI
+
+Each solo’s info panel links to a MIDI file timed to its local audio excerpt.
+The export uses Weimar’s note transcription and `bend`, `slide`, `vibrato`, and
+`fall-off` annotations. It adds MIDI pitch-wheel events using pitch estimates
+from the recording where the tracker can follow the soloist. The other
+gestures use approximations based on the annotation and available pitch
+measurements. [The manifest](public/midi/manifest.json) records which method
+was used for each gesture.
+
+To regenerate the exports, install FFmpeg and the Python packages `mido`,
+`numpy`, and `scipy`, then run `python3 scripts/export_expression_midi.py`.
+The script reads the [Weimar Jazz Database extracts](public/wjd/NOTICE.txt)
+and the local recordings.
+
 Only the librawl archive pinned in `package.json` belongs in Git. When updating
 the pin, stage the new archive with `git add -f` and remove the previous archive
 from the Git index.

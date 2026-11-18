@@ -172,6 +172,7 @@ export function SoloMetadata({ solo, recording }: { solo: JazzSolo; recording: W
     if (event.currentTarget.open) setAnnotations(true);
   };
   const key = accidentals(solo.key).replace(/-maj$/, " major").replace(/-min$/, " minor");
+  const part = solo.solopart > 1 ? ` (${solo.solopart})` : "";
   return (
     <details className="solo-metadata">
       <summary className="solo-metadata-toggle" aria-label="Metadata" title="Metadata">
@@ -184,6 +185,8 @@ export function SoloMetadata({ solo, recording }: { solo: JazzSolo; recording: W
         <div className="solo-metadata-heading">
           <h2 id="solo-metadata-heading">Metadata</h2>
           <a href={recording.source} target="_blank" rel="noreferrer">Weimar entry</a>
+          <a href={`${import.meta.env.BASE_URL}midi/${solo.melid}.mid`}
+            download={`${solo.performer} - ${solo.title}${part}.mid`}>Expressive MIDI</a>
         </div>
         <div className="solo-metadata-groups">
           <Properties name="Recording" fields={[
