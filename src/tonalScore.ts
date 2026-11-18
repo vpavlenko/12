@@ -160,10 +160,7 @@ export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: s
   });
 
   const pickupProgress = buildPickupProgress(beats, measures, origin);
-  return {
-    notes, measures, tonic, end, origin, harmony, chorusStarts, phraseStarts,
-    firstChorus, hasLongPickup, terminalBar, pickupProgress, sourceBeats: beats,
-  };
+  return { notes, measures, tonic, end, origin, harmony, chorusStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, pickupProgress };
 }
 
 export type TonalScore = ReturnType<typeof buildTonalScore>;

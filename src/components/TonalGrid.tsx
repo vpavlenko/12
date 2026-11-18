@@ -6,9 +6,7 @@ import type { NotePlaybackClock } from "librawl/native";
 import "librawl/style.css";
 import "librawl/native.css";
 import "librawl/roman-numerals.css";
-import type { AnalysisLabel } from "../soloAnalysis";
 import { pickupProgressAt, type TonalScore } from "../tonalScore";
-import { SoloAnalysisLabels } from "./SoloAnalysis";
 import "./TonalGrid.css";
 
 export const DEFAULT_TIME_SPACING = 25;
@@ -130,7 +128,6 @@ function syncHorizontalScroll(scrollLeft: number, target: HTMLDivElement | null)
 
 type Props = {
   score: TonalScore;
-  analysis: readonly AnalysisLabel[];
   changes: TonicChange[];
   onChangesChange: (changes: TonicChange[]) => void;
   playback: NotePlaybackClock;
@@ -202,7 +199,7 @@ function ScoreSection({
 }
 
 export default function TonalGrid({
-  analysis, changes, onChangesChange, playback, playbackPosition, onSeek, ...sizing
+  changes, onChangesChange, playback, playbackPosition, onSeek, ...sizing
 }: Props) {
   const { score, noteHeight } = sizing;
   const separatePickup = score.hasLongPickup && score.firstChorus !== undefined && score.firstChorus < score.end;
@@ -233,9 +230,6 @@ export default function TonalGrid({
     onSeek: seek,
     onNote: recoloring.selectedMeasure === null ? undefined : recoloring.chooseNote,
     noteScale: noteHeight / PITCH_STEP,
-    renderHeader: analysis.length > 0
-      ? (row) => <SoloAnalysisLabels labels={analysis} score={score} row={row} />
-      : undefined,
   };
 
   return (
