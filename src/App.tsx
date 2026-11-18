@@ -129,7 +129,19 @@ function App() {
   const [noteHeight, setNoteHeight] = useState<number>(PITCH_STEP);
   const [timeSpacing, setTimeSpacing] = useState(DEFAULT_TIME_SPACING);
   const [recoloring, setRecoloring] = useState<{ melid: number; changes: TonicChange[] }>();
-  const playback = useNotePlaybackClock();
+  const notePlayback = useNotePlaybackClock();
+  const playbackPosition = useRef<(time?: number) => void>();
+  const playback = useMemo(() => ({
+    register: notePlayback.register,
+    advance(time: number) {
+      notePlayback.advance(time);
+      playbackPosition.current?.(time);
+    },
+    reset() {
+      notePlayback.reset();
+      playbackPosition.current?.();
+    },
+  }), [notePlayback]);
   const audioRef = useRef<HTMLAudioElement>(null);
   const compositionScroll = useRef<HTMLDivElement>(null);
 
@@ -240,6 +252,7 @@ function App() {
             changes={changes}
             onChangesChange={(next) => setRecoloring({ melid, changes: next })}
             playback={playback}
+            playbackPosition={playbackPosition}
             noteHeight={noteHeight}
             timeSpacing={timeSpacing}
             onNoteHeightChange={setNoteHeight}

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { RawlNotation, useTonicRecoloring, type RawlNotationProps, type ScoreRow, type TonicChange } from "librawl";
 import { RomanNumeral, ScorePinchContent, useScorePinch } from "librawl/components";
 import { alignScoreRows, PITCH_STEP } from "librawl/geometry";
@@ -6,7 +6,7 @@ import type { NotePlaybackClock } from "librawl/native";
 import "librawl/style.css";
 import "librawl/native.css";
 import "librawl/roman-numerals.css";
-import type { TonalScore } from "../tonalScore";
+import { pickupProgressAt, type TonalScore } from "../tonalScore";
 import "./TonalGrid.css";
 
 export const DEFAULT_TIME_SPACING = 25;
@@ -58,12 +58,39 @@ function placeChordLabels(anchors: number[], widths: number[], gap: number, avai
   return positions;
 }
 
-function HarmonyHeader({ score, row }: { score: TonalScore; row: ScoreRow }) {
+type PlaybackPosition = MutableRefObject<((time?: number) => void) | undefined>;
+
+function HarmonyHeader({ score, row, playbackPosition }: {
+  score: TonalScore;
+  row: ScoreRow;
+  playbackPosition?: PlaybackPosition;
+}) {
   const ref = useRef<HTMLDivElement>(null);
+  const progressLine = useRef<HTMLDivElement>(null);
   const chords = useMemo(() => harmonyInRow(score, row), [score, row]);
+  const hasPickupProgress = !!playbackPosition && score.pickupProgress.length > 0;
+
+  useLayoutEffect(() => {
+    const line = progressLine.current;
+    if (!playbackPosition || !line) return;
+    const rowDuration = row.end - row.start;
+    playbackPosition.current = (time) => {
+      const progress = time === undefined ? undefined : pickupProgressAt(score.pickupProgress, time);
+      if (!progress || progress.start < row.start || progress.end > row.end) {
+        if (!line.hidden) line.hidden = true;
+        return;
+      }
+      const left = 100 * (progress.start - row.start) / rowDuration;
+      const width = (progress.end - progress.start) / rowDuration;
+      line.style.transform = `translateX(${left}%) scaleX(${width})`;
+      if (line.hidden) line.hidden = false;
+    };
+    return () => { playbackPosition.current = undefined; };
+  }, [playbackPosition, row, score.pickupProgress]);
+
   useLayoutEffect(() => {
     const header = ref.current!;
-    const labels = Array.from(header.children) as HTMLElement[];
+    const labels = Array.from(header.querySelectorAll<HTMLElement>(".tonal-grid-chord"));
     const arrange = () => {
       const width = header.clientWidth;
       if (!width || !labels.length) return;
@@ -84,7 +111,8 @@ function HarmonyHeader({ score, row }: { score: TonalScore; row: ScoreRow }) {
   }, [chords]);
 
   return (
-    <div className="tonal-grid-harmony" ref={ref} style={row.style}>
+    <div className={hasPickupProgress ? "tonal-grid-harmony tonal-grid-harmony-count-in" : "tonal-grid-harmony"} ref={ref} style={row.style}>
+      {hasPickupProgress && <div className="tonal-grid-count-in" ref={progressLine} aria-hidden="true" hidden />}
       {chords.map(({ start, label, rootPitch, bassPitch, tooltip }) => (
         <div className="tonal-grid-chord" key={start} style={{ left: `calc(${percentOf(row, start)} + 5px)` }}>
           <RomanNumeral notation={label} options={{ jazz: true, font: "sans-serif", rootPitch, bassPitch }} tooltip={tooltip ?? true} />
@@ -103,6 +131,7 @@ type Props = {
   changes: TonicChange[];
   onChangesChange: (changes: TonicChange[]) => void;
   playback: NotePlaybackClock;
+  playbackPosition: PlaybackPosition;
   noteHeight: number;
   timeSpacing: number;
   onNoteHeightChange: (height: number) => void;
@@ -114,11 +143,12 @@ type SectionProps = Pick<Props, "score" | "noteHeight" | "timeSpacing" | "onNote
   rows: ScoreRow[];
   scoreWidth: string;
   stickyHarmony?: boolean;
+  playbackPosition?: PlaybackPosition;
   notation: RawlNotationProps;
 };
 
 function ScoreSection({
-  score, rows, scoreWidth, stickyHarmony, notation,
+  score, rows, scoreWidth, stickyHarmony, playbackPosition, notation,
   noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange,
 }: SectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -147,7 +177,7 @@ function ScoreSection({
         onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft, containerRef.current)}
       >
         <div ref={harmonyContentRef} style={{ width: scoreWidth }}>
-          <HarmonyHeader score={score} row={rows[0]} />
+          <HarmonyHeader score={score} row={rows[0]} playbackPosition={playbackPosition} />
         </div>
       </div>
       <div
@@ -169,7 +199,7 @@ function ScoreSection({
 }
 
 export default function TonalGrid({
-  changes, onChangesChange, playback, onSeek, ...sizing
+  changes, onChangesChange, playback, playbackPosition, onSeek, ...sizing
 }: Props) {
   const { score, noteHeight } = sizing;
   const separatePickup = score.hasLongPickup && score.firstChorus !== undefined && score.firstChorus < score.end;
@@ -205,7 +235,7 @@ export default function TonalGrid({
   return (
     <div className="tonal-grid-container">
       {pickup && <ScoreSection {...sizing} rows={pickup.rows} scoreWidth={scoreWidth(pickup.width)} notation={notation} />}
-      <ScoreSection {...sizing} rows={choruses.rows} scoreWidth={scoreWidth(choruses.width)} notation={notation} stickyHarmony />
+      <ScoreSection {...sizing} rows={choruses.rows} scoreWidth={scoreWidth(choruses.width)} notation={notation} playbackPosition={playbackPosition} stickyHarmony />
     </div>
   );
 }

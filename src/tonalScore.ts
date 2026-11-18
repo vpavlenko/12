@@ -29,6 +29,7 @@ const WJD_CHORD_TYPES: Record<string, string> = {
 
 type Measure = SourceMeasure & { sourceNumber: number; beatPositions: number[] };
 type TimedNote = MidiNote & { playbackSpan: [start: number, end: number] };
+type PickupBeat = { time: number; position: number };
 
 function buildMeasures(beats: BeatsItem[], origin: number, endTime: number) {
   const measures: Measure[] = [];
@@ -51,6 +52,50 @@ function buildMeasures(beats: BeatsItem[], origin: number, endTime: number) {
     });
   }
   return measures;
+}
+
+function buildPickupProgress(beats: BeatsItem[], measures: Measure[], origin: number) {
+  const firstSoloBeat = beats.findIndex(({ bar }) => bar === 1);
+  if (firstSoloBeat <= 0) return [];
+
+  const chorusBeats = new Map<number, Map<number, number>>();
+  for (let index = firstSoloBeat; index < beats.length && beats[index].bar <= 12; index++) {
+    const { bar, beat, onset } = beats[index];
+    const positions = chorusBeats.get(bar) ?? new Map<number, number>();
+    positions.set(beat, onset - origin);
+    chorusBeats.set(bar, positions);
+  }
+
+  const progress: PickupBeat[][] = [];
+  let index = 0;
+  while (index < firstSoloBeat) {
+    const { bar } = beats[index];
+    const targetBar = mod(bar - 1) + 1;
+    const targetMeasure = measures.find(({ sourceNumber }) => sourceNumber === targetBar);
+    const targetBeats = chorusBeats.get(targetBar);
+    const points: PickupBeat[] = [];
+    while (index < firstSoloBeat && beats[index].bar === bar) {
+      const { beat, onset } = beats[index++];
+      const position = targetBeats?.get(beat);
+      if (position !== undefined) points.push({ time: onset, position });
+    }
+    if (targetMeasure && points.length) {
+      // An incomplete target bar only has positions through its recorded end.
+      points.push({ time: beats[index].onset, position: targetMeasure.start + targetMeasure.duration });
+      progress.push(points);
+    }
+  }
+  return progress;
+}
+
+export function pickupProgressAt(bars: PickupBeat[][], time: number) {
+  const bar = bars.find((points) => time >= points[0].time && time < points[points.length - 1].time);
+  if (!bar) return;
+  const nextIndex = bar.findIndex((point) => time < point.time);
+  const previous = bar[nextIndex - 1];
+  const next = bar[nextIndex];
+  const fraction = (time - previous.time) / (next.time - previous.time);
+  return { start: bar[0].position, end: previous.position + fraction * (next.position - previous.position) };
 }
 
 function chordNotation(symbol: string, tonicName: string, tonic: number) {
@@ -114,7 +159,8 @@ export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: s
     return stop - start > EPSILON ? [{ ...chordNotation(chord, tonicName, tonic), start, end: stop }] : [];
   });
 
-  return { notes, measures, tonic, end, origin, harmony, chorusStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar };
+  const pickupProgress = buildPickupProgress(beats, measures, origin);
+  return { notes, measures, tonic, end, origin, harmony, chorusStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, pickupProgress };
 }
 
 export type TonalScore = ReturnType<typeof buildTonalScore>;

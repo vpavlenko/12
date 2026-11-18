@@ -38,6 +38,18 @@
   line-height: 1.2;
 }
 
+.tonal-grid-harmony-count-in {
+  min-height: 33px;
+}
+
+.tonal-grid-count-in {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: #ddd;
+  transform-origin: left;
+}
+
 .tonal-grid-chord {
   position: absolute;
   bottom: 0;
