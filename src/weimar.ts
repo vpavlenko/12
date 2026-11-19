@@ -1,14 +1,19 @@
 import majorBlues from "../data/wjd_maj_blues.json";
 import minorBlues from "../data/wjd_minor_blues.json";
 import bodyAndSoul from "../data/wjd_body_and_soul.json";
+import rhythmChanges from "../data/wjd_rhythm_changes.json";
+import measureGroups from "../data/measure_groups.json";
 import recordingData from "../data/wjd_recordings.json";
 
 export type JazzSolo = typeof majorBlues[number];
 export const bluesSolos: JazzSolo[] = [...majorBlues, ...minorBlues].sort((a, b) => a.melid - b.melid);
 export const bodyAndSoulSolos: JazzSolo[] = bodyAndSoul;
-export const solos = [...bluesSolos, ...bodyAndSoulSolos];
+export const rhythmChangesSolos: JazzSolo[] = rhythmChanges;
+export const solos = [...bluesSolos, ...bodyAndSoulSolos, ...rhythmChangesSolos];
 export const bodyAndSoulSoloIds = new Set(bodyAndSoulSolos.map(({ melid }) => melid));
-export const annotatedSoloIds = new Set([...minorBlues, ...bodyAndSoulSolos].map(({ melid }) => melid));
+export const rhythmChangesSoloIds = new Set(rhythmChangesSolos.map(({ melid }) => melid));
+export const annotatedSoloIds = new Set([...minorBlues, ...bodyAndSoulSolos, ...rhythmChangesSolos].map(({ melid }) => melid));
+export const barsPerMeasureByComposition: Partial<Record<number, number>> = measureGroups;
 export type WeimarRecording = typeof recordingData[keyof typeof recordingData];
 const weimarRecordings: Record<string, WeimarRecording | undefined> = recordingData;
 

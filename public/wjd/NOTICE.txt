@@ -5,7 +5,7 @@ https://jazzomat.hfm-weimar.de/download/download.html
 The Weimar Jazz Database is licensed under the Open Data Commons Open Database
 License 1.0. https://opendatacommons.org/licenses/odbl/1-0/
 
-12 extracts recording metadata and selected transcription fields for 100 solos.
+12 extracts recording metadata and selected transcription fields for 120 solos.
 The source download and extraction script are documented in the project README.
 
 Pfleiderer, Martin, Klaus Frieler, Jakob Abeßer, Wolf-Georg Zaddach, and

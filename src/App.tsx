@@ -19,10 +19,10 @@ import { SoloAudio } from "./components/SoloPlayback";
 import { audioTimeAt, type AudioExcerpt } from "./recordingClock";
 import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
-import { buildTonalScore, type BeatsItem, type MelodyItem } from "./tonalScore";
+import { buildTonalScore, type BeatsItem, type MelodyItem, type ScoreForm } from "./tonalScore";
 import {
-  annotatedSoloIds, bluesSolos, bodyAndSoulSoloIds, bodyAndSoulSolos,
-  instrumentName, recordingForSolo, soloKey, solos, type JazzSolo,
+  annotatedSoloIds, barsPerMeasureByComposition, bluesSolos, bodyAndSoulSoloIds, bodyAndSoulSolos,
+  instrumentName, recordingForSolo, rhythmChangesSoloIds, rhythmChangesSolos, soloKey, solos, type JazzSolo,
 } from "./weimar";
 
 const STYLES = {
@@ -37,6 +37,10 @@ const STYLES = {
 
 const INITIAL_SOLO = 1;
 const FIRST_BODY_AND_SOUL = bluesSolos.length;
+const FIRST_RHYTHM_CHANGES = FIRST_BODY_AND_SOUL + bodyAndSoulSolos.length;
+const CATALOGUE_LABELS = { blues: "12", bodyAndSoul: "Body and Soul", rhythmChanges: "Rhythm Changes" };
+type Catalogue = keyof typeof CATALOGUE_LABELS;
+const CATALOGUES = Object.keys(CATALOGUE_LABELS) as Catalogue[];
 const MAJOR_SIXTH_SEMITONES = 9;
 const MINOR_BLUES_LINK_STYLE = { "--composition-accent": RAWL_COLORS[MAJOR_SIXTH_SEMITONES].background } as CSSProperties;
 
@@ -72,11 +76,9 @@ async function loadCsv<T>(filePath: string, signal: AbortSignal) {
   return data;
 }
 
-type SoloData = {
+type SoloData = ScoreForm & {
   melody: MelodyItem[];
   beats: BeatsItem[];
-  chorusBars?: number[];
-  formBars?: number[];
 };
 
 async function loadSoloData(melid: number, fileName: string, signal: AbortSignal): Promise<SoloData> {
@@ -94,11 +96,15 @@ async function loadSoloData(melid: number, fileName: string, signal: AbortSignal
         choruses.set(chorus_id, bar);
       }
     }
-    const formBars = bodyAndSoulSoloIds.has(melid)
+    const rhythmChanges = rhythmChangesSoloIds.has(melid);
+    const sections = rhythmChanges || bodyAndSoulSoloIds.has(melid)
       ? beats.filter(({ bar, beat, form }) => beat === 1 && form
-        && (/^\*?[AB]\d+$/.test(form) || (bar > 0 && form === "I1"))).map(({ bar }) => bar)
+        && (/^\*?[ABC]\d+$/.test(form) || (bar > 0 && /^I\d+$/.test(form))))
       : undefined;
-    return { beats, melody: notes, chorusBars: [...choruses.values()], formBars };
+    const formBars = sections?.map(({ bar }) => bar);
+    const rowBars = sections?.filter(({ form }, index) =>
+      sections[index - 1]?.form !== "A2" || !/^\*?B/.test(form ?? "")).map(({ bar }) => bar);
+    return { beats, melody: notes, chorusBars: [...choruses.values()], formBars, rowBars };
   }
 
   const [melody, beats] = await Promise.all([
@@ -125,7 +131,10 @@ function useSoloData(melid: number, fileName: string) {
 
 const soloIndices = new Map(solos.map(({ melid }, index) => [melid, index]));
 const soloLink = (melid: number) => `#solo-${melid}`;
-const catalogueForSolo = (index: number) => index >= FIRST_BODY_AND_SOUL ? "bodyAndSoul" : "blues";
+function catalogueForSolo(index: number): Catalogue {
+  if (index >= FIRST_RHYTHM_CHANGES) return "rhythmChanges";
+  return index >= FIRST_BODY_AND_SOUL ? "bodyAndSoul" : "blues";
+}
 
 function soloFromLocation() {
   const match = /^#solo-(\d+)$/.exec(window.location.hash);
@@ -142,19 +151,24 @@ function decadeRange(years: number[]) {
   return `${first}..${abbreviated}s`;
 }
 
-const compositionGroups = Object.entries(STYLES).map(([style, label]) => {
+function groupByPerformer(solos: JazzSolo[], startIndex: number, style?: string) {
   const performers = new Map<string, { solo: JazzSolo; index: number }[]>();
   const years: number[] = [];
-  bluesSolos.forEach((solo, index) => {
-    if (solo.style !== style) return;
+  solos.forEach((solo, index) => {
+    if (style && solo.style !== style) return;
     const year = recordingForSolo(solo.melid)?.recording_year;
     if (year != null) years.push(year);
     const entries = performers.get(solo.performer) ?? [];
-    entries.push({ solo, index });
+    entries.push({ solo, index: index + startIndex });
     performers.set(solo.performer, entries);
   });
-  return { style, label, years: decadeRange(years), performers: [...performers] };
-});
+  return { years: decadeRange(years), performers: [...performers] };
+}
+
+const compositionGroups = Object.entries(STYLES).map(([style, label]) => ({
+  style, label, ...groupByPerformer(bluesSolos, 0, style),
+}));
+const rhythmChangesGroup = groupByPerformer(rhythmChangesSolos, FIRST_RHYTHM_CHANGES);
 
 function eraForSolo(index: number) {
   return compositionGroups.find(({ style }) => style === solos[index].style) ?? compositionGroups[0];
@@ -164,8 +178,10 @@ function App() {
   const [selectedSolo, setSelectedSolo] = useState(soloFromLocation);
   const [selectedEra, setSelectedEra] = useState(() => eraForSolo(selectedSolo));
   const catalogue = catalogueForSolo(selectedSolo);
-  const lastSolo = useRef({ blues: INITIAL_SOLO, bodyAndSoul: FIRST_BODY_AND_SOUL,
-    [catalogue]: selectedSolo });
+  const lastSolo = useRef({
+    blues: INITIAL_SOLO, bodyAndSoul: FIRST_BODY_AND_SOUL, rhythmChanges: FIRST_RHYTHM_CHANGES,
+    [catalogue]: selectedSolo,
+  });
   const [noteHeight, setNoteHeight] = useState<number>(PITCH_STEP);
   const [timeSpacing, setTimeSpacing] = useState(DEFAULT_TIME_SPACING);
   const [recoloring, setRecoloring] = useState<{ melid: number; changes: TonicChange[] }>();
@@ -187,13 +203,14 @@ function App() {
 
   const solo = solos[selectedSolo];
   const { instrument, melid } = solo;
+  const barsPerMeasure = barsPerMeasureByComposition[solo.compid];
   const key = soloKey(solo);
   const fileName = makeFileName(solo);
   const soloData = useSoloData(melid, fileName);
   const audio = playbackBySolo[melid]?.audio;
   const score = useMemo(() => soloData?.beats.length
-    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart, soloData.chorusBars, soloData.formBars)
-    : undefined, [soloData, key, audio?.scoreStart]);
+    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart, { ...soloData, barsPerMeasure })
+    : undefined, [soloData, key, audio?.scoreStart, barsPerMeasure]);
   const recording = recordingForSolo(melid);
   const changes = recoloring?.melid === melid ? recoloring.changes : NO_CHANGES;
   const heading = [instrumentName(instrument), recording?.recording_year].filter(Boolean).join(", ");
@@ -245,6 +262,7 @@ function App() {
   }
 
   const inBlues = catalogue === "blues";
+  const group = inBlues ? selectedEra : rhythmChangesGroup;
   return (
     <div className="solo-layout">
       <aside className="composition-pane" aria-label="Compositions">
@@ -265,14 +283,15 @@ function App() {
           ))}
         </div>}
         <div className="composition-scroll" id="composition-list" ref={compositionScroll}>
-          {inBlues && selectedEra.years && <b>{selectedEra.years}</b>}
+          {catalogue !== "bodyAndSoul" && group.years && <b>{group.years}</b>}
           <ul className="composition-performers" role="list">
-            {inBlues ? selectedEra.performers.map(([performer, entries]) => (
+            {catalogue !== "bodyAndSoul" ? group.performers.map(([performer, entries]) => (
               <li key={performer} className="composition-performer">
                 <span className="composition-performer-name">{performer}</span>
                 <ul className="composition-solos" role="list">
                   {entries.map(({ solo, index }) => {
-                    const label = solo.solopart > 1 ? `${solo.title} (${solo.solopart})` : solo.title;
+                    const title = [solo.title, solo.titleaddon].filter(Boolean).join(" ");
+                    const label = solo.solopart > 1 ? `${title} (${solo.solopart})` : title;
                     return soloChoice(solo, index, label);
                   })}
                 </ul>
@@ -285,8 +304,11 @@ function App() {
           </ul>
         </div>
         <nav className="composition-picker" aria-label="Catalogue">
-          <a href={soloLink(solos[lastSolo.current.blues].melid)} aria-current={inBlues ? "true" : undefined}>12</a>
-          <a href={soloLink(solos[lastSolo.current.bodyAndSoul].melid)} aria-current={inBlues ? undefined : "true"}>Body and Soul</a>
+          {CATALOGUES.map((id) => (
+            <a key={id} href={soloLink(solos[lastSolo.current[id]].melid)} aria-current={catalogue === id ? "true" : undefined}>
+              {CATALOGUE_LABELS[id]}
+            </a>
+          ))}
         </nav>
       </aside>
       <main className="solo-main">

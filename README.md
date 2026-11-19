@@ -14,6 +14,8 @@ AND (solo_info.key LIKE '%-maj' OR solo_info.key LIKE '%-min');
 on [wjazzd.db](https://jazzomat.hfm-weimar.de/dbformat/dboverview.html)
 
 The Body and Soul catalogue includes every solo joined to composition ID 75 in the same database.
+The Rhythm Changes catalogue uses every solo with `composition_info.template = 'I Got Rhythm'`.
+Both catalogues place the second A and the bridge on the same score row.
 
 [Recording metadata](data/wjd_recordings.json) and [annotations](public/wjd) come from the
 [Weimar Jazz Database v2.1](https://jazzomat.hfm-weimar.de/download/download.html)
@@ -35,6 +37,9 @@ to account for both lead-in and transfer speed. The roll uses Weimar’s
 transcribed note times and annotated beat times directly. Measure widths can
 vary within a chorus. The footer uses the same note spans and committed tonic
 changes, converted to the excerpt's clock.
+
+Both Nothing Personal solos use 12 displayed and MIDI measures per chorus,
+pairing Weimar's faster annotated measures.
 
 John Coltrane's alternate take uses a local 366 ms timing correction between
 two notes. Stan Getz's excerpt matches the 12 December 1952 recording dated in

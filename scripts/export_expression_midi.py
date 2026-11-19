@@ -16,12 +16,13 @@ from track_midi_pitch import audio_time, measured_curves
 
 
 ROOT = Path(__file__).resolve().parent.parent
+MEASURE_GROUPS = json.loads((ROOT / "data/measure_groups.json").read_text(encoding="utf-8"))
 PPQ = 960
 BEND_RANGE = 12
 PITCHED_CHANNELS = tuple(channel for channel in range(16) if channel != 9)
 PROGRAMS = {
-    "as": 65, "bcl": 71, "bs": 67, "cor": 56, "g": 26,
-    "ss": 64, "tb": 57, "tp": 56, "ts": 66, "vib": 11,
+    "as": 65, "bcl": 71, "bs": 67, "cl": 71, "cor": 56, "g": 26,
+    "p": 0, "ss": 64, "tb": 57, "tp": 56, "ts": 66, "vib": 11,
 }
 # Corpus-median defaults are used where a tagged note lacks a measurement.
 ESTIMATED_RANGES = {"bend": 50, "fall-off": 60, "slide": 55, "vibrato": 80}
@@ -164,9 +165,20 @@ def append_events(track, events):
         previous_tick = tick
 
 
+def group_measures(beats, bars_per_measure):
+    for beat in beats:
+        beat_offset = (beat["bar"] - 1) % bars_per_measure * 4 + beat["beat"] - 1
+        if beat_offset % bars_per_measure == 0:
+            yield {**beat, "beat": beat_offset // bars_per_measure + 1}
+
+
 def write_solo(solo, data, alignment, extracted, destination):
     notes = data["notes"]
-    clock = BeatClock(data["beats"], alignment)
+    beats = data["beats"]
+    bars_per_measure = MEASURE_GROUPS.get(str(solo["compid"]), 1)
+    if bars_per_measure > 1:
+        beats = group_measures(beats, bars_per_measure)
+    clock = BeatClock(beats, alignment)
     midi = MidiFile(type=1, ticks_per_beat=PPQ)
     append_events(midi.add_track("Tempo"), clock.events)
     melody = midi.add_track("Melody")
@@ -241,6 +253,7 @@ def main():
         *read_json(ROOT / "data/wjd_maj_blues.json"),
         *read_json(ROOT / "data/wjd_minor_blues.json"),
         *read_json(ROOT / "data/wjd_body_and_soul.json"),
+        *read_json(ROOT / "data/wjd_rhythm_changes.json"),
     ]
     selected = set(args.solo or (solo["melid"] for solo in corpus))
     if selected - {solo["melid"] for solo in corpus}:

@@ -124,6 +124,7 @@ def main():
         Path('data/wjd_maj_blues.json'),
         Path('data/wjd_minor_blues.json'),
         Path('data/wjd_body_and_soul.json'),
+        Path('data/wjd_rhythm_changes.json'),
     ]
     solos = [solo for path in catalogs for solo in json.loads(path.read_text(encoding='utf-8'))]
     if len({solo['melid'] for solo in solos}) != len(solos):
