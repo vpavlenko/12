@@ -13,7 +13,7 @@ export const solos = [...bluesSolos, ...bodyAndSoulSolos, ...rhythmChangesSolos]
 export const bodyAndSoulSoloIds = new Set(bodyAndSoulSolos.map(({ melid }) => melid));
 export const rhythmChangesSoloIds = new Set(rhythmChangesSolos.map(({ melid }) => melid));
 export const annotatedSoloIds = new Set([...minorBlues, ...bodyAndSoulSolos, ...rhythmChangesSolos].map(({ melid }) => melid));
-export const barsPerMeasureByComposition: Partial<Record<number, number>> = measureGroups;
+export const barsPerMeasureBySolo: Partial<Record<number, number>> = measureGroups;
 export type WeimarRecording = typeof recordingData[keyof typeof recordingData];
 const weimarRecordings: Record<string, WeimarRecording | undefined> = recordingData;
 

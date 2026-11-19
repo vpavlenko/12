@@ -21,7 +21,7 @@ import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
 import { buildTonalScore, type BeatsItem, type MelodyItem, type ScoreForm } from "./tonalScore";
 import {
-  annotatedSoloIds, barsPerMeasureByComposition, bluesSolos, bodyAndSoulSoloIds, bodyAndSoulSolos,
+  annotatedSoloIds, barsPerMeasureBySolo, bluesSolos, bodyAndSoulSoloIds, bodyAndSoulSolos,
   instrumentName, recordingForSolo, rhythmChangesSoloIds, rhythmChangesSolos, soloKey, solos, type JazzSolo,
 } from "./weimar";
 
@@ -203,7 +203,7 @@ function App() {
 
   const solo = solos[selectedSolo];
   const { instrument, melid } = solo;
-  const barsPerMeasure = barsPerMeasureByComposition[solo.compid];
+  const barsPerMeasure = barsPerMeasureBySolo[melid];
   const key = soloKey(solo);
   const fileName = makeFileName(solo);
   const soloData = useSoloData(melid, fileName);

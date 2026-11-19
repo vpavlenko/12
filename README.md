@@ -38,8 +38,9 @@ transcribed note times and annotated beat times directly. Measure widths can
 vary within a chorus. The footer uses the same note spans and committed tonic
 changes, converted to the excerpt's clock.
 
-Both Nothing Personal solos use 12 displayed and MIDI measures per chorus,
-pairing Weimar's faster annotated measures.
+The score and MIDI pair Weimar's faster annotated measures in both Nothing
+Personal solos (12 measures per chorus) and both John Coltrane takes of
+Body and Soul (32 measures per chorus).
 
 John Coltrane's alternate take uses a local 366 ms timing correction between
 two notes. Stan Getz's excerpt matches the 12 December 1952 recording dated in

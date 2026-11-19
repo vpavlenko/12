@@ -175,7 +175,7 @@ def group_measures(beats, bars_per_measure):
 def write_solo(solo, data, alignment, extracted, destination):
     notes = data["notes"]
     beats = data["beats"]
-    bars_per_measure = MEASURE_GROUPS.get(str(solo["compid"]), 1)
+    bars_per_measure = MEASURE_GROUPS.get(str(solo["melid"]), 1)
     if bars_per_measure > 1:
         beats = group_measures(beats, bars_per_measure)
     clock = BeatClock(beats, alignment)

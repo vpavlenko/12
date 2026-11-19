@@ -28,8 +28,67 @@ function harmonyInRow(score: TonalScore, row: ScoreRow) {
   return score.harmony.flatMap((harmony) => {
     const start = Math.max(harmony.start, row.start);
     const end = Math.min(harmony.end, row.end);
-    return start < end ? [{ ...harmony, start, end }] : [];
+    return start < end ? [{ ...harmony, start }] : [];
   });
+}
+
+function placeChordLabels(anchors: number[], widths: number[], gap: number, available: number) {
+  let end = 0;
+  const offsets = widths.map((width) => {
+    const offset = end;
+    end += width + gap;
+    return offset;
+  });
+  const slack = Math.max(0, available - end + gap);
+  const runs: { start: number; end: number; mean: number }[] = [];
+  const positions = [...offsets];
+
+  // Merge overlapping runs to minimize the displacement from the chord changes.
+  anchors.forEach((anchor, index) => {
+    let run = { start: index, end: index + 1, mean: anchor - offsets[index] };
+    while (runs.length && runs[runs.length - 1].mean > run.mean) {
+      const previous = runs.pop()!;
+      const sum = previous.mean * (previous.end - previous.start) + run.mean * (run.end - run.start);
+      run = { start: previous.start, end: run.end, mean: sum / (run.end - previous.start) };
+    }
+    runs.push(run);
+  });
+  for (const { start, end, mean } of runs) {
+    const shift = Math.max(0, Math.min(slack, mean));
+    for (let index = start; index < end; index++) positions[index] += shift;
+  }
+  return positions;
+}
+
+function fitChordLabels(container: HTMLDivElement) {
+  const headers = Array.from(container.querySelectorAll<HTMLElement>(".solo-score-harmony"),
+    (header) => ({ header, labels: Array.from(header.querySelectorAll<HTMLElement>(".solo-score-chord")) }));
+  const fit = () => {
+    const gap = 4;
+    const rows = headers.flatMap(({ header, labels }) => {
+      const width = parseFloat(getComputedStyle(header).width);
+      if (!width || !labels.length) return [];
+      const widths = labels.map((label) => label.offsetWidth + 1);
+      const anchors = labels.map((label) => parseFloat(getComputedStyle(label).left));
+      const required = widths.reduce((sum, value) => sum + value) + (labels.length - 1) * gap;
+      return [{ width, labels, widths, anchors, scale: width / required }];
+    });
+    const scale = rows.reduce((limit, row) => Math.min(limit, row.scale), 1);
+    container.style.setProperty("--solo-chord-scale", String(scale));
+    for (const { width, labels, widths, anchors } of rows) {
+      const positions = placeChordLabels(anchors.map((anchor) => anchor + 4), widths.map((value) => value * scale), gap * scale, width);
+      labels.forEach((label, index) => {
+        label.style.setProperty("--solo-chord-offset", `${positions[index] - anchors[index]}px`);
+      });
+    }
+  };
+  fit();
+  const observer = new ResizeObserver(fit);
+  for (const { header, labels } of headers) {
+    observer.observe(header);
+    labels.forEach((label) => observer.observe(label));
+  }
+  return () => observer.disconnect();
 }
 
 type PlaybackPosition = RefObject<((time?: number) => void) | undefined>;
@@ -40,7 +99,6 @@ function HarmonyHeader({ score, row, playbackPosition, inline }: {
   playbackPosition?: PlaybackPosition;
   inline?: boolean;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
   const progressLine = useRef<HTMLDivElement>(null);
   const chords = useMemo(() => harmonyInRow(score, row), [score, row]);
   const hasCountIn = !!playbackPosition && score.countInProgress.length > 0;
@@ -63,32 +121,8 @@ function HarmonyHeader({ score, row, playbackPosition, inline }: {
     return () => { playbackPosition.current = undefined; };
   }, [playbackPosition, row, score]);
 
-  useLayoutEffect(() => {
-    const header = ref.current!;
-    const labels = Array.from(header.querySelectorAll<HTMLElement>(".solo-score-chord"));
-    if (!labels.length) return;
-    const fit = () => {
-      const width = parseFloat(getComputedStyle(header).width);
-      if (!width) return;
-      const pixelsPerSecond = width / (row.end - row.start);
-      const widths = labels.map((label) => label.offsetWidth + 1);
-      labels.forEach((label, index) => {
-        const { start, end } = chords[index];
-        const slotWidth = (end - start) * pixelsPerSecond;
-        const inset = Math.min(4, slotWidth / 10);
-        const scale = Math.min(1, (slotWidth - 2 * inset) / widths[index]);
-        label.style.transform = `translateX(${inset}px) scale(${scale})`;
-      });
-    };
-    fit();
-    const observer = new ResizeObserver(fit);
-    observer.observe(header);
-    labels.forEach((label) => observer.observe(label));
-    return () => observer.disconnect();
-  }, [chords, row.end, row.start]);
-
   return (
-    <div className={hasCountIn ? "solo-score-harmony solo-score-harmony-count-in" : "solo-score-harmony"} ref={ref} style={inline ? undefined : row.style}>
+    <div className={hasCountIn ? "solo-score-harmony solo-score-harmony-count-in" : "solo-score-harmony"} style={inline ? undefined : row.style}>
       {hasCountIn && <div className="solo-score-count-in" ref={progressLine} aria-hidden="true" hidden />}
       {chords.map(({ start, label, rootPitch, bassPitch, tooltip }) => (
         <div className="solo-score-chord" key={start} style={{ left: percentOf(row, start) }}>
@@ -182,6 +216,7 @@ export default function SoloScore({
   changes, onChangesChange, playback, playbackPosition, onSeek, ...sizing
 }: Props) {
   const { score, noteHeight } = sizing;
+  const scoreContainer = useRef<HTMLDivElement>(null);
   const firstSection = score.formStarts?.[0] ?? score.firstChorus;
   const separatePickup = score.hasLongPickup && firstSection !== undefined && firstSection > 0 && firstSection < score.end;
   const [pickup, choruses] = useMemo(() => {
@@ -191,6 +226,7 @@ export default function SoloScore({
       : [undefined, alignScoreRows(rows)];
   }, [score, separatePickup]);
   const longestSection = Math.max(pickup?.width ?? 0, choruses.width);
+  useLayoutEffect(() => fitChordLabels(scoreContainer.current!), [score]);
   const zoom = sizing.timeSpacing / DEFAULT_TIME_SPACING;
   const scoreWidth = (duration: number) => `${100 * (duration / longestSection) * zoom}%`;
   const recoloring = useTonicRecoloring({ changes, onChange: onChangesChange, measureMap: score.measures });
@@ -214,7 +250,7 @@ export default function SoloScore({
   };
 
   return (
-    <div className="solo-score-container">
+    <div className="solo-score-container" ref={scoreContainer}>
       {pickup && <ScoreSection {...sizing} rows={pickup.rows} scoreWidth={scoreWidth(pickup.width)} notation={notation} />}
       <ScoreSection {...sizing} rows={choruses.rows} scoreWidth={scoreWidth(choruses.width)} notation={notation}
         playbackPosition={playbackPosition} inlineHarmony={score.formStarts !== undefined} stickyHarmony />

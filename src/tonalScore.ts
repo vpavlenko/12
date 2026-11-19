@@ -50,7 +50,7 @@ function buildMeasures(beats: BeatsItem[], origin: number, endTime: number) {
       duration: stopTime - startTime,
       sourceNumber: bar,
       beatPositions: beats.slice(first, index)
-        .filter(({ beat, onset }) => beat !== 1 && onset > startTime && onset < stopTime - EPSILON)
+        .filter(({ beat, onset }) => Number.isInteger(beat) && beat !== 1 && onset > startTime && onset < stopTime - EPSILON)
         .map(({ onset }) => onset - origin),
       playbackSpans: [[startTime, stopTime]],
     });
@@ -82,8 +82,11 @@ function buildCountInProgress(
     chorusBeats.set(bar, positions);
   }
 
-  const firstBeat = beats[0];
-  const openingIntervals = beats.slice(1, 5).map(({ onset }, index) => onset - beats[index].onset)
+  const firstMetricBeat = Number.isInteger(beats[0].beat) ? 0 : 1;
+  const firstBeat = beats[firstMetricBeat];
+  if (!firstBeat) return [];
+  const openingIntervals = beats.slice(firstMetricBeat + 1, firstMetricBeat + 5)
+    .map(({ onset }, index) => onset - beats[firstMetricBeat + index].onset)
     .filter((duration) => duration > EPSILON).sort((a, b) => a - b);
   const beatDuration = openingIntervals[Math.floor(openingIntervals.length / 2)];
   const beatsPerBar = parseInt(beats.find(({ signature }) => signature)?.signature ?? "4", 10);
@@ -101,7 +104,7 @@ function buildCountInProgress(
       inferredBeats.push({ bar, beat, onset });
     }
   }
-  const leadIn = [...inferredBeats.reverse(), ...beats.slice(0, firstRenderedBeat + 1)];
+  const leadIn = [...inferredBeats.reverse(), ...beats.slice(firstMetricBeat, Math.max(firstMetricBeat, firstRenderedBeat) + 1)];
 
   const progress: PickupBeat[][] = [];
   let index = 0;
@@ -189,19 +192,24 @@ export type ScoreForm = {
   barsPerMeasure?: number;
 };
 
+function groupedBar(bar: number, barsPerMeasure: number) {
+  return Math.floor((bar - 1) / barsPerMeasure) + 1;
+}
+
 function groupMeasures(beats: BeatsItem[], barsPerMeasure: number) {
-  return beats.flatMap((item) => {
-    const measure = Math.floor((item.bar - 1) / barsPerMeasure);
-    const beatOffset = (item.bar - 1 - measure * barsPerMeasure) * 4 + item.beat - 1;
-    return beatOffset % barsPerMeasure === 0
-      ? [{ ...item, bar: measure + 1, beat: beatOffset / barsPerMeasure + 1 }]
+  return beats.flatMap((item, index) => {
+    const bar = groupedBar(item.bar, barsPerMeasure);
+    const beatOffset = (item.bar - 1 - (bar - 1) * barsPerMeasure) * 4 + item.beat - 1;
+    // The first annotation can land between grouped beats in a pickup.
+    return index === 0 || beatOffset % barsPerMeasure === 0
+      ? [{ ...item, bar, beat: beatOffset / barsPerMeasure + 1 }]
       : [];
   });
 }
 
 export function buildTonalScore(
   beats: BeatsItem[], melody: MelodyItem[], key: string, audioStart?: number,
-  { chorusBars: sourceChorusBars = [], formBars, rowBars, barsPerMeasure = 1 }: ScoreForm = {},
+  { chorusBars: sourceChorusBars = [], formBars: sourceFormBars, rowBars: sourceRowBars, barsPerMeasure = 1 }: ScoreForm = {},
 ) {
   const tonicName = key.split("-")[0] || "C";
   const tonic = Note.chroma(tonicName) ?? 0;
@@ -210,7 +218,10 @@ export function buildTonalScore(
   const firstNote = transcribed.reduce((time, note) => Math.min(time, note.onset), Infinity);
   const lastNoteEnd = transcribed.reduce((time, note) => Math.max(time, note.onset + note.duration), -Infinity);
   const metricBeats = barsPerMeasure === 1 ? beats : groupMeasures(beats, barsPerMeasure);
-  const chorusBars = sourceChorusBars.map((bar) => Math.floor((bar - 1) / barsPerMeasure) + 1);
+  const toMeasure = (bar: number) => groupedBar(bar, barsPerMeasure);
+  const chorusBars = sourceChorusBars.map(toMeasure);
+  const formBars = sourceFormBars?.map(toMeasure);
+  const rowBars = sourceRowBars?.map(toMeasure);
   const firstRenderedBeat = firstRenderedBeatIndex(metricBeats, firstNote);
   const renderedBeats = metricBeats.slice(firstRenderedBeat);
   const origin = Math.min(firstNote, renderedBeats[0].onset);
