@@ -28,36 +28,8 @@ function harmonyInRow(score: TonalScore, row: ScoreRow) {
   return score.harmony.flatMap((harmony) => {
     const start = Math.max(harmony.start, row.start);
     const end = Math.min(harmony.end, row.end);
-    return start < end ? [{ ...harmony, start }] : [];
+    return start < end ? [{ ...harmony, start, end }] : [];
   });
-}
-
-function placeChordLabels(anchors: number[], widths: number[], gap: number, available: number) {
-  let end = 0;
-  const offsets = widths.map((width) => {
-    const offset = end;
-    end += width + gap;
-    return offset;
-  });
-  const slack = Math.max(0, available - end + gap);
-  const runs: { start: number; end: number; mean: number }[] = [];
-  const positions = [...offsets];
-
-  // Merge overlapping runs so each label stays as close as possible to its anchor.
-  anchors.forEach((anchor, index) => {
-    let run = { start: index, end: index + 1, mean: anchor - offsets[index] };
-    while (runs.length && runs[runs.length - 1].mean > run.mean) {
-      const previous = runs.pop()!;
-      const sum = previous.mean * (previous.end - previous.start) + run.mean * (run.end - run.start);
-      run = { start: previous.start, end: run.end, mean: sum / (run.end - previous.start) };
-    }
-    runs.push(run);
-  });
-  for (const { start, end, mean } of runs) {
-    const shift = Math.max(0, Math.min(slack, mean));
-    for (let index = start; index < end; index++) positions[index] += shift;
-  }
-  return positions;
 }
 
 type PlaybackPosition = RefObject<((time?: number) => void) | undefined>;
@@ -94,30 +66,32 @@ function HarmonyHeader({ score, row, playbackPosition, inline }: {
   useLayoutEffect(() => {
     const header = ref.current!;
     const labels = Array.from(header.querySelectorAll<HTMLElement>(".solo-score-chord"));
-    const arrange = () => {
-      const width = header.clientWidth;
-      if (!width || !labels.length) return;
-      const gap = 4;
-      const anchors = labels.map((label) => label.offsetLeft);
+    if (!labels.length) return;
+    const fit = () => {
+      const width = parseFloat(getComputedStyle(header).width);
+      if (!width) return;
+      const pixelsPerSecond = width / (row.end - row.start);
       const widths = labels.map((label) => label.offsetWidth + 1);
-      const preferredWidth = widths.reduce((total, next) => total + next) + (widths.length - 1) * gap;
-      const scale = Math.min(1, width / preferredWidth);
-      const positions = placeChordLabels(anchors, widths.map((value) => value * scale), gap * scale, width);
       labels.forEach((label, index) => {
-        label.style.transform = `translateX(${positions[index] - anchors[index]}px) scale(${scale})`;
+        const { start, end } = chords[index];
+        const slotWidth = (end - start) * pixelsPerSecond;
+        const inset = Math.min(4, slotWidth / 10);
+        const scale = Math.min(1, (slotWidth - 2 * inset) / widths[index]);
+        label.style.transform = `translateX(${inset}px) scale(${scale})`;
       });
     };
-    arrange();
-    const observer = new ResizeObserver(arrange);
+    fit();
+    const observer = new ResizeObserver(fit);
     observer.observe(header);
+    labels.forEach((label) => observer.observe(label));
     return () => observer.disconnect();
-  }, [chords]);
+  }, [chords, row.end, row.start]);
 
   return (
     <div className={hasCountIn ? "solo-score-harmony solo-score-harmony-count-in" : "solo-score-harmony"} ref={ref} style={inline ? undefined : row.style}>
       {hasCountIn && <div className="solo-score-count-in" ref={progressLine} aria-hidden="true" hidden />}
       {chords.map(({ start, label, rootPitch, bassPitch, tooltip }) => (
-        <div className="solo-score-chord" key={start} style={{ left: `calc(${percentOf(row, start)} + 5px)` }}>
+        <div className="solo-score-chord" key={start} style={{ left: percentOf(row, start) }}>
           <RomanNumeral notation={label} options={{ jazz: true, font: "sans-serif", rootPitch, bassPitch }} tooltip={tooltip ?? true} />
         </div>
       ))}

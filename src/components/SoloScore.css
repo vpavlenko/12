@@ -53,6 +53,7 @@
 .solo-score-chord {
   position: absolute;
   bottom: 0;
+  width: max-content;
   transform-origin: left bottom;
   white-space: nowrap;
 }
