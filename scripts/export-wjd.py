@@ -108,7 +108,7 @@ def write_json(path, value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('database', type=Path, help=f'Local copy of {DOWNLOAD_URL}')
-    parser.add_argument('--catalog', type=Path, default=Path('data/wjd_maj_blues.json'))
+    parser.add_argument('--catalog', type=Path, action='append')
     parser.add_argument('--output', type=Path, default=Path('.'))
     args = parser.parse_args()
 
@@ -120,12 +120,13 @@ def main():
     if db.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
         parser.error('SQLite could not validate the source database.')
 
-    solos = json.loads(args.catalog.read_text(encoding='utf-8'))
+    catalogs = args.catalog or [Path('data/wjd_maj_blues.json'), Path('data/wjd_minor_blues.json')]
+    solos = [solo for path in catalogs for solo in json.loads(path.read_text(encoding='utf-8'))]
     if len({solo['melid'] for solo in solos}) != len(solos):
         parser.error('The catalog repeats a solo ID.')
     catalog = {}
     details = {}
-    for solo in solos:
+    for solo in sorted(solos, key=lambda row: row['melid']):
         melid = solo['melid']
         catalog[melid], details[melid] = load_solo(db, solo)
     db.close()

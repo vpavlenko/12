@@ -187,6 +187,10 @@
     max-height: min(32dvh, 240px);
   }
 
+  .composition-eras button {
+    padding-inline: 3px;
+  }
+
   .solo-main {
     --solo-inline-padding: 12px;
   }

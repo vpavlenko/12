@@ -241,7 +241,10 @@ def main():
     if args.solo and args.output is None:
         parser.error("Use --output to write a subset without replacing the corpus manifest.")
     output = args.output if args.output is not None else ROOT / "public/midi"
-    corpus = read_json(ROOT / "data/wjd_maj_blues.json")
+    corpus = [
+        *read_json(ROOT / "data/wjd_maj_blues.json"),
+        *read_json(ROOT / "data/wjd_minor_blues.json"),
+    ]
     selected = set(args.solo or (solo["melid"] for solo in corpus))
     if selected - {solo["melid"] for solo in corpus}:
         parser.error("Unknown melody ID.")

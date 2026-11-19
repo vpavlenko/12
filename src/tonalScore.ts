@@ -21,6 +21,7 @@ const WJD_CHORD_TYPES: Record<string, string> = {
   sus7913: "13sus4",
   "79b": "7b9",
   "79#": "7#9",
+  "+79#": "7#5#9",
   "7911#": "9#11",
   "7913b": "9b13",
   "79": "9",
@@ -65,13 +66,14 @@ function firstRenderedBeatIndex(beats: BeatsItem[], firstNote: number) {
 
 function buildCountInProgress(
   beats: BeatsItem[], measures: Measure[], origin: number, firstRenderedBeat: number, audioStart: number,
+  chorusLength: number,
 ) {
   if (audioStart >= origin) return [];
 
   const chorusBeats = new Map<number, Map<number, number>>();
   for (const { bar, beat, onset } of beats) {
     if (bar < 1) continue;
-    if (bar > 12) break;
+    if (bar > chorusLength) break;
     const positions = chorusBeats.get(bar) ?? new Map<number, number>();
     positions.set(beat, onset - origin);
     chorusBeats.set(bar, positions);
@@ -102,7 +104,7 @@ function buildCountInProgress(
   let index = 0;
   while (index < leadIn.length - 1) {
     const { bar: sourceBar } = leadIn[index];
-    const targetBar = mod(sourceBar - 1) + 1;
+    const targetBar = ((sourceBar - 1) % chorusLength + chorusLength) % chorusLength + 1;
     const targetMeasure = measures.find(({ sourceNumber }) => sourceNumber === targetBar);
     const targetBeats = chorusBeats.get(targetBar);
     const points: PickupBeat[] = [];
@@ -134,14 +136,25 @@ export function countInProgressAt(score: TonalScore, time: number) {
   return { start: bar[0].position, end: previous.position + fraction * (next.position - previous.position) };
 }
 
+function romanNumeral(tonic: string, root: string, quality = "") {
+  const [numeral] = Progression.toRomanNumerals(tonic, [root + quality]);
+  if (/^(?:bb|##)/.test(numeral)) {
+    const [enharmonic] = Progression.toRomanNumerals(tonic, [Note.enharmonic(root) + quality]);
+    if (!/^(?:bb|##)/.test(enharmonic)) return enharmonic;
+  }
+  return numeral;
+}
+
 function chordNotation(symbol: string, tonicName: string, tonic: number) {
   const [chord, bass] = symbol.split("/");
   const [, root, type] = /^([A-G][b#]?)(.*)$/.exec(chord) ?? [];
   if (!root) return { label: symbol };
-  const normalized = root + (WJD_CHORD_TYPES[type] ?? type);
+  const quality = WJD_CHORD_TYPES[type] ?? type;
+  const normalized = root + quality;
   const rootChroma = Note.chroma(root);
   const bassChroma = bass ? Note.chroma(bass) : null;
-  const roots = Progression.toRomanNumerals(tonicName, bass ? [normalized, bass] : [normalized]);
+  const rootNotation = romanNumeral(tonicName, root, quality);
+  const bassNotation = bass ? romanNumeral(tonicName, bass) : undefined;
   const rootPitch = rootChroma === null ? undefined : mod(rootChroma - tonic);
   const bassPitch = bassChroma === null ? undefined : mod(bassChroma - tonic);
   const chordIntervals = Chord.get(normalized).intervals.map(Interval.semitones);
@@ -159,14 +172,16 @@ function chordNotation(symbol: string, tonicName: string, tonic: number) {
     }
   }
   return {
-    label: roots.join("/"),
+    label: [rootNotation, bassNotation].filter(Boolean).join("/"),
     rootPitch,
     bassPitch,
-    tooltip: pitches.length ? { pitches, rootPitches, rootNotation: roots[0], inversion: Math.max(0, inversion) } : undefined,
+    tooltip: pitches.length ? { pitches, rootPitches, rootNotation, inversion: Math.max(0, inversion) } : undefined,
   };
 }
 
-export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: string, audioStart?: number) {
+export function buildTonalScore(
+  beats: BeatsItem[], melody: MelodyItem[], key: string, audioStart?: number, chorusBars: number[] = [],
+) {
   const tonicName = key.split("-")[0] || "C";
   const tonic = Note.chroma(tonicName) ?? 0;
   const transcribed = melody.filter(({ pitch, onset, duration }) =>
@@ -180,9 +195,12 @@ export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: s
   const recordedEndTime = Math.max(lastNoteEnd, lastBeat.onset);
   const recordedMeasures = buildMeasures(renderedBeats, origin, recordedEndTime);
   const lastBar = recordedMeasures[recordedMeasures.length - 1]?.sourceNumber ?? 0;
-  const lastFullChorusBar = Math.floor(lastBar / 12) * 12;
+  const chorusLength = chorusBars.length > 1 ? chorusBars[1] - chorusBars[0] : 12;
+  const finalChorusBar = chorusBars[chorusBars.length - 1];
+  const lastFullChorusBar = finalChorusBar === undefined ? Math.floor(lastBar / chorusLength) * chorusLength
+    : finalChorusBar + chorusLength - 1 <= lastBar ? finalChorusBar + chorusLength - 1 : finalChorusBar - 1;
   // Keep complete choruses and any later measures reached by a sounding note.
-  const trailingRest = lastFullChorusBar >= 12 && transcribed.length > 0
+  const trailingRest = lastFullChorusBar > 0 && transcribed.length > 0
     ? recordedMeasures.findIndex(({ sourceNumber, start }) => sourceNumber > lastFullChorusBar && start >= lastNoteEnd - origin)
     : -1;
   const end = trailingRest < 0 ? recordedEndTime - origin : recordedMeasures[trailingRest].start;
@@ -191,11 +209,20 @@ export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: s
     id: String(index), pitch, start: onset - origin, duration, voice: 0, playbackSpan: [onset, onset + duration],
   }));
   const lastNoteStart = notes.reduce((last, note) => Math.max(last, note.start), 0);
-  const phraseStarts = measures.filter(({ sourceNumber }) => (sourceNumber - 1) % 4 === 0)
-    .map(({ start }) => start);
-  const chorusStarts = measures.filter(({ sourceNumber, start }) =>
-    sourceNumber >= 1 && (sourceNumber - 1) % 12 === 0 && start <= lastNoteStart)
-    .map(({ start }) => start);
+  const annotatedChoruses = new Set(chorusBars);
+  const phraseStarts: number[] = [];
+  const chorusStarts: number[] = [];
+  const phraseLength = chorusLength / 3;
+  let chorusBar = 1;
+  for (const { sourceNumber, start } of measures) {
+    const beginsChorus = sourceNumber >= 1 && (annotatedChoruses.size > 0
+      ? annotatedChoruses.has(sourceNumber) : (sourceNumber - 1) % chorusLength === 0);
+    if (beginsChorus) {
+      chorusBar = sourceNumber;
+      if (start <= lastNoteStart) chorusStarts.push(start);
+    }
+    if ((sourceNumber - chorusBar) % phraseLength === 0) phraseStarts.push(start);
+  }
   const firstChorus = measures.find(({ sourceNumber }) => sourceNumber === 1)?.start;
   const hasLongPickup = measures.filter(({ sourceNumber }) => sourceNumber < 1).length > 1;
   const terminalBar = trailingRest >= 0 || (lastBeat.beat === 1 && lastBeat.onset === recordedEndTime) ? end : undefined;
@@ -207,7 +234,7 @@ export function buildTonalScore(beats: BeatsItem[], melody: MelodyItem[], key: s
   });
 
   const countInProgress = audioStart === undefined ? []
-    : buildCountInProgress(beats, measures, origin, firstRenderedBeat, audioStart);
+    : buildCountInProgress(beats, measures, origin, firstRenderedBeat, audioStart, chorusLength);
   return { notes, measures, tonic, end, origin, harmony, chorusStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, countInProgress };
 }
 

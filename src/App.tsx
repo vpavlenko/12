@@ -6,7 +6,6 @@ import {
   useState,
 } from "react";
 import "./App.css";
-import data from "../data/wjd_maj_blues.json";
 import playbackData from "../data/playback.json";
 import type { TonicChange } from "librawl";
 import { useNotePlaybackClock } from "librawl/native";
@@ -19,7 +18,7 @@ import { SoloAudio, type AudioExcerpt } from "./components/SoloPlayback";
 import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
 import { buildTonalScore, type BeatsItem, type MelodyItem } from "./tonalScore";
-import { instrumentName, weimarRecordings, type JazzSolo } from "./weimar";
+import { annotatedSoloIds, instrumentName, solos, weimarRecordings, type JazzSolo } from "./weimar";
 
 const STYLES = {
   TRADITIONAL: "trad",
@@ -28,6 +27,7 @@ const STYLES = {
   COOL: "cool",
   HARDBOP: "hardbop",
   POSTBOP: "postbop",
+  FUSION: "fusion",
 };
 
 const INITIAL_SOLO = 1;
@@ -64,29 +64,52 @@ async function loadCsv<T>(filePath: string, signal: AbortSignal) {
   return data;
 }
 
-function useSoloData(fileName: string) {
-  const [loaded, setLoaded] = useState<{
-    fileName: string;
-    melody: MelodyItem[];
-    beats: BeatsItem[];
-  }>();
+type SoloData = {
+  melody: MelodyItem[];
+  beats: BeatsItem[];
+  chorusBars?: number[];
+};
+
+async function loadSoloData(melid: number, fileName: string, signal: AbortSignal): Promise<SoloData> {
+  if (annotatedSoloIds.has(melid)) {
+    const path = `wjd/${melid}.json`;
+    const response = await fetch(import.meta.env.BASE_URL + path, { signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status} for ${path}`);
+    const { beats, notes }: {
+      beats: (BeatsItem & { chorus_id: number })[];
+      notes: MelodyItem[];
+    } = await response.json();
+    const choruses = new Map<number, number>();
+    for (const { chorus_id, bar, beat } of beats) {
+      if (chorus_id > 0 && bar > 0 && beat === 1 && !choruses.has(chorus_id)) {
+        choruses.set(chorus_id, bar);
+      }
+    }
+    return { beats, melody: notes, chorusBars: [...choruses.values()] };
+  }
+
+  const [melody, beats] = await Promise.all([
+    loadCsv<MelodyItem>(`csv_melody/${fileName}`, signal),
+    loadCsv<BeatsItem>(`csv_beats/${fileName}`, signal),
+  ]);
+  return { melody, beats };
+}
+
+function useSoloData(melid: number, fileName: string) {
+  const [loaded, setLoaded] = useState<SoloData & { melid: number }>();
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
-    Promise.all([
-      loadCsv<MelodyItem>(`csv_melody/${fileName}`, signal),
-      loadCsv<BeatsItem>(`csv_beats/${fileName}`, signal),
-    ]).then(([melody, beats]) => {
-      if (!signal.aborted) setLoaded({ fileName, melody, beats });
+    loadSoloData(melid, fileName, signal).then((data) => {
+      if (!signal.aborted) setLoaded({ melid, ...data });
     }).catch((error) => {
-      if (!signal.aborted) console.error("Error loading the CSV file:", error);
+      if (!signal.aborted) console.error("Error loading the solo:", error);
     });
     return () => controller.abort();
-  }, [fileName]);
-  return loaded?.fileName === fileName ? loaded : undefined;
+  }, [fileName, melid]);
+  return loaded?.melid === melid ? loaded : undefined;
 }
 
-const solos: JazzSolo[] = data;
 const soloIndices = new Map(solos.map(({ melid }, index) => [melid, index]));
 const soloLink = (melid: number) => `#solo-${melid}`;
 
@@ -148,10 +171,10 @@ function App() {
   const solo = solos[selectedSolo];
   const { key, instrument, melid } = solo;
   const fileName = makeFileName(solo);
-  const soloData = useSoloData(fileName);
+  const soloData = useSoloData(melid, fileName);
   const audio = playbackBySolo[melid]?.audio;
   const score = useMemo(() => soloData?.beats.length
-    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart)
+    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart, soloData.chorusBars)
     : undefined, [soloData, key, audio?.scoreStart]);
   const recording = weimarRecordings[melid];
   const changes = recoloring?.melid === melid ? recoloring.changes : NO_CHANGES;

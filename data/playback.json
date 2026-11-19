@@ -31,6 +31,22 @@
       }
     }
   },
+  "32": {
+    "audio": {
+      "path": "audio/32.m4a",
+      "videoId": "b5pWOFYHUxE",
+      "videoStart": 151.0738,
+      "videoEnd": 246.1636,
+      "scoreStart": 0.0,
+      "secondsPerScoreSecond": 1.001537
+    },
+    "youtube": {
+      "b5pWOFYHUxE": {
+        "scoreZero": 151.0738,
+        "secondsPerScoreSecond": 1.001537
+      }
+    }
+  },
   "38": {
     "audio": {
       "path": "audio/38.m4a",
@@ -171,6 +187,22 @@
       }
     }
   },
+  "76": {
+    "audio": {
+      "path": "audio/76.m4a",
+      "videoId": "xzi8FoVV30w",
+      "videoStart": 24.2665,
+      "videoEnd": 89.8132,
+      "scoreStart": 0.0,
+      "secondsPerScoreSecond": 0.9999243
+    },
+    "youtube": {
+      "xzi8FoVV30w": {
+        "scoreZero": 24.2665,
+        "secondsPerScoreSecond": 0.9999243
+      }
+    }
+  },
   "94": {
     "audio": {
       "path": "audio/94.m4a",
@@ -212,6 +244,26 @@
       "XBbGoxqzQkA": {
         "scoreZero": 9.5965,
         "secondsPerScoreSecond": 1.0014865
+      }
+    }
+  },
+  "103": {
+    "audio": {
+      "path": "audio/103.m4a",
+      "videoId": "wZVw5NgCYtk",
+      "videoStart": 141.1428,
+      "videoEnd": 183.7052,
+      "scoreStart": 0.0,
+      "secondsPerScoreSecond": 1.001174
+    },
+    "youtube": {
+      "wZVw5NgCYtk": {
+        "scoreZero": 141.1428,
+        "secondsPerScoreSecond": 1.001174
+      },
+      "B1fjf2slzRk": {
+        "scoreZero": 141.3375,
+        "secondsPerScoreSecond": 1.0012084
       }
     }
   },
@@ -475,6 +527,26 @@
       }
     }
   },
+  "167": {
+    "audio": {
+      "path": "audio/167.m4a",
+      "videoId": "wZVw5NgCYtk",
+      "videoStart": 180.0264,
+      "videoEnd": 223.9907,
+      "scoreStart": 0.0,
+      "secondsPerScoreSecond": 1.0007947
+    },
+    "youtube": {
+      "wZVw5NgCYtk": {
+        "scoreZero": 180.0264,
+        "secondsPerScoreSecond": 1.0007947
+      },
+      "B1fjf2slzRk": {
+        "scoreZero": 180.2218,
+        "secondsPerScoreSecond": 1.0009616
+      }
+    }
+  },
   "169": {
     "audio": {
       "path": "audio/169.m4a",
@@ -699,6 +771,22 @@
       }
     }
   },
+  "226": {
+    "audio": {
+      "path": "audio/226.m4a",
+      "videoId": "Jv5j_Lx2R4g",
+      "videoStart": 20.3327,
+      "videoEnd": 202.4194,
+      "scoreStart": 0.0,
+      "secondsPerScoreSecond": 1.0014609
+    },
+    "youtube": {
+      "Jv5j_Lx2R4g": {
+        "scoreZero": 20.3327,
+        "secondsPerScoreSecond": 1.0014609
+      }
+    }
+  },
   "234": {
     "audio": {
       "path": "audio/234.m4a",
@@ -748,6 +836,22 @@
       "f4far-VQbE4": {
         "scoreZero": 38.0582,
         "secondsPerScoreSecond": 0.9999676
+      }
+    }
+  },
+  "245": {
+    "audio": {
+      "path": "audio/245.m4a",
+      "videoId": "ZmuENW3Dtc4",
+      "videoStart": 87.7005,
+      "videoEnd": 151.704,
+      "scoreStart": 0.0,
+      "secondsPerScoreSecond": 0.9999898
+    },
+    "youtube": {
+      "ZmuENW3Dtc4": {
+        "scoreZero": 87.7005,
+        "secondsPerScoreSecond": 0.9999898
       }
     }
   },
@@ -1003,6 +1107,22 @@
       }
     }
   },
+  "306": {
+    "audio": {
+      "path": "audio/306.m4a",
+      "videoId": "FnZc-wekyFc",
+      "videoStart": 139.4697,
+      "videoEnd": 263.1433,
+      "scoreStart": 0.0,
+      "secondsPerScoreSecond": 1.000179
+    },
+    "youtube": {
+      "FnZc-wekyFc": {
+        "scoreZero": 139.4697,
+        "secondsPerScoreSecond": 1.000179
+      }
+    }
+  },
   "313": {
     "audio": {
       "path": "audio/313.m4a",
@@ -1188,6 +1308,22 @@
       "22l3KUrjSzI": {
         "scoreZero": 190.6935,
         "secondsPerScoreSecond": 0.9999516
+      }
+    }
+  },
+  "345": {
+    "audio": {
+      "path": "audio/345.m4a",
+      "videoId": "FnZc-wekyFc",
+      "videoStart": 65.5676,
+      "videoEnd": 145.4405,
+      "scoreStart": 0.0,
+      "secondsPerScoreSecond": 1.0003486
+    },
+    "youtube": {
+      "FnZc-wekyFc": {
+        "scoreZero": 65.5676,
+        "secondsPerScoreSecond": 1.0003486
       }
     }
   },
@@ -1500,6 +1636,26 @@
       "j49xLM_wmYQ": {
         "scoreZero": 31.8377,
         "secondsPerScoreSecond": 0.9999913
+      }
+    }
+  },
+  "428": {
+    "audio": {
+      "path": "audio/428.m4a",
+      "videoId": "wZVw5NgCYtk",
+      "videoStart": 94.6332,
+      "videoEnd": 145.8483,
+      "scoreStart": 0.0,
+      "secondsPerScoreSecond": 1.0016211
+    },
+    "youtube": {
+      "wZVw5NgCYtk": {
+        "scoreZero": 94.6332,
+        "secondsPerScoreSecond": 1.0016211
+      },
+      "B1fjf2slzRk": {
+        "scoreZero": 94.8294,
+        "secondsPerScoreSecond": 1.0016032
       }
     }
   },

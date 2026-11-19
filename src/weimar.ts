@@ -1,7 +1,10 @@
-import catalog from "../data/wjd_maj_blues.json";
+import majorBlues from "../data/wjd_maj_blues.json";
+import minorBlues from "../data/wjd_minor_blues.json";
 import recordingData from "../data/wjd_recordings.json";
 
-export type JazzSolo = typeof catalog[number];
+export type JazzSolo = typeof majorBlues[number];
+export const solos: JazzSolo[] = [...majorBlues, ...minorBlues].sort((a, b) => a.melid - b.melid);
+export const annotatedSoloIds = new Set(minorBlues.map(({ melid }) => melid));
 export type WeimarRecording = typeof recordingData[keyof typeof recordingData];
 export const weimarRecordings: Record<string, WeimarRecording | undefined> = recordingData;
 

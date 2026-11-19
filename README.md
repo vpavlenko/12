@@ -8,7 +8,7 @@ FROM solo_info
 JOIN composition_info ON solo_info.compid = composition_info.compid
 WHERE composition_info.tonalitytype = 'BLUES'
 AND composition_info.form = 'A12' AND solo_info.signature = '4/4'
-AND solo_info.key LIKE '%maj';
+AND (solo_info.key LIKE '%-maj' OR solo_info.key LIKE '%-min');
 ```
 
 on [wjazzd.db](https://jazzomat.hfm-weimar.de/dbformat/dboverview.html)
