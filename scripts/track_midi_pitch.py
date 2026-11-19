@@ -22,6 +22,15 @@ HARMONIC_WEIGHTS = np.array([0.8, 1.0, 0.95, 0.8, 0.65, 0.55, 0.4])
 GESTURES = {"bend", "slide", "fall-off", "vibrato"}
 
 
+def audio_time(score_time, alignment):
+    base = (score_time - alignment["scoreStart"]) * alignment["secondsPerScoreSecond"]
+    correction = alignment.get("scoreTimeCorrection")
+    if correction is None:
+        return base
+    progress = (score_time - correction["start"]) / (correction["end"] - correction["start"])
+    return base + np.clip(progress, 0, 1) * correction["seconds"]
+
+
 def _decode_audio(path):
     decoded = subprocess.run(
         [
@@ -105,7 +114,7 @@ def _fits_gesture(curve, times, gesture, expected_range, frequency):
     return True
 
 
-def _measure_note(signal, note, score_start, seconds_per_score_second):
+def _measure_note(signal, note, alignment):
     gesture = note.get("f0_mod")
     duration = note["duration"]
     expected_range = note.get("f0_range")
@@ -120,10 +129,10 @@ def _measure_note(signal, note, score_start, seconds_per_score_second):
     spread = min(620, max(95, 0.82 * expected_range + 35))
     candidates = center + CENT_STEP * np.arange(-math.ceil(spread / CENT_STEP), math.ceil(spread / CENT_STEP) + 1)
     window = min(0.076, max(0.038, 4.5 / nominal_hz), 0.65 * duration)
-    trim = window / (2 * seconds_per_score_second)
+    trim = window / (2 * alignment["secondsPerScoreSecond"])
     count = max(5, math.ceil((duration - 2 * trim) / HOP_SECONDS) + 1)
     times = np.linspace(trim, duration - trim, count)
-    audio_times = (note["onset"] + times - score_start) * seconds_per_score_second
+    audio_times = audio_time(note["onset"] + times, alignment)
     evidence = _spectral_evidence(signal, audio_times, nominal_hz, candidates, window)
     if evidence is None:
         return None
@@ -152,7 +161,7 @@ def measured_curves(audio_path: Path, notes: list[dict], alignment: dict):
     audio = _decode_audio(audio_path)
     curves = {}
     for index, note in enumerate(notes):
-        points = _measure_note(audio, note, alignment["scoreStart"], alignment["secondsPerScoreSecond"])
+        points = _measure_note(audio, note, alignment)
         if points is not None:
             curves[index] = points
     return curves

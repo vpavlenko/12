@@ -1,12 +1,23 @@
 import majorBlues from "../data/wjd_maj_blues.json";
 import minorBlues from "../data/wjd_minor_blues.json";
+import bodyAndSoul from "../data/wjd_body_and_soul.json";
 import recordingData from "../data/wjd_recordings.json";
 
 export type JazzSolo = typeof majorBlues[number];
-export const solos: JazzSolo[] = [...majorBlues, ...minorBlues].sort((a, b) => a.melid - b.melid);
-export const annotatedSoloIds = new Set(minorBlues.map(({ melid }) => melid));
+export const bluesSolos: JazzSolo[] = [...majorBlues, ...minorBlues].sort((a, b) => a.melid - b.melid);
+export const bodyAndSoulSolos: JazzSolo[] = bodyAndSoul;
+export const solos = [...bluesSolos, ...bodyAndSoulSolos];
+export const bodyAndSoulSoloIds = new Set(bodyAndSoulSolos.map(({ melid }) => melid));
+export const annotatedSoloIds = new Set([...minorBlues, ...bodyAndSoulSolos].map(({ melid }) => melid));
 export type WeimarRecording = typeof recordingData[keyof typeof recordingData];
-export const weimarRecordings: Record<string, WeimarRecording | undefined> = recordingData;
+const weimarRecordings: Record<string, WeimarRecording | undefined> = recordingData;
+
+export function recordingForSolo(melid: number) {
+  const recording = weimarRecordings[melid];
+  if (melid !== 398 || !recording) return recording;
+  // Bill Crow's discography and the matched Verve recording date the session.
+  return { ...recording, recordingdate: "1952-12-12", recordingdate_precision: "day", recording_year: 1952 };
+}
 
 const correctedKeys: Partial<Record<number, string>> = {
   // Redman's 12-bar progression uses D7#9 as I and A7#9 as V.

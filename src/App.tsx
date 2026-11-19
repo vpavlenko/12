@@ -15,11 +15,15 @@ import { PITCH_STEP } from "librawl/geometry";
 import "librawl/score-size-sliders.css";
 import Papa from "papaparse";
 import SoloScore, { DEFAULT_TIME_SPACING } from "./components/SoloScore";
-import { SoloAudio, type AudioExcerpt } from "./components/SoloPlayback";
+import { SoloAudio } from "./components/SoloPlayback";
+import { audioTimeAt, type AudioExcerpt } from "./recordingClock";
 import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
 import { buildTonalScore, type BeatsItem, type MelodyItem } from "./tonalScore";
-import { annotatedSoloIds, instrumentName, soloKey, solos, weimarRecordings, type JazzSolo } from "./weimar";
+import {
+  annotatedSoloIds, bluesSolos, bodyAndSoulSoloIds, bodyAndSoulSolos,
+  instrumentName, recordingForSolo, soloKey, solos, type JazzSolo,
+} from "./weimar";
 
 const STYLES = {
   TRADITIONAL: "trad",
@@ -32,6 +36,7 @@ const STYLES = {
 };
 
 const INITIAL_SOLO = 1;
+const FIRST_BODY_AND_SOUL = bluesSolos.length;
 const MAJOR_SIXTH_SEMITONES = 9;
 const MINOR_BLUES_LINK_STYLE = { "--composition-accent": RAWL_COLORS[MAJOR_SIXTH_SEMITONES].background } as CSSProperties;
 
@@ -71,6 +76,7 @@ type SoloData = {
   melody: MelodyItem[];
   beats: BeatsItem[];
   chorusBars?: number[];
+  formBars?: number[];
 };
 
 async function loadSoloData(melid: number, fileName: string, signal: AbortSignal): Promise<SoloData> {
@@ -79,7 +85,7 @@ async function loadSoloData(melid: number, fileName: string, signal: AbortSignal
     const response = await fetch(import.meta.env.BASE_URL + path, { signal });
     if (!response.ok) throw new Error(`HTTP ${response.status} for ${path}`);
     const { beats, notes }: {
-      beats: (BeatsItem & { chorus_id: number })[];
+      beats: (BeatsItem & { chorus_id: number; form: string | null })[];
       notes: MelodyItem[];
     } = await response.json();
     const choruses = new Map<number, number>();
@@ -88,7 +94,11 @@ async function loadSoloData(melid: number, fileName: string, signal: AbortSignal
         choruses.set(chorus_id, bar);
       }
     }
-    return { beats, melody: notes, chorusBars: [...choruses.values()] };
+    const formBars = bodyAndSoulSoloIds.has(melid)
+      ? beats.filter(({ bar, beat, form }) => beat === 1 && form
+        && (/^\*?[AB]\d+$/.test(form) || (bar > 0 && form === "I1"))).map(({ bar }) => bar)
+      : undefined;
+    return { beats, melody: notes, chorusBars: [...choruses.values()], formBars };
   }
 
   const [melody, beats] = await Promise.all([
@@ -115,6 +125,7 @@ function useSoloData(melid: number, fileName: string) {
 
 const soloIndices = new Map(solos.map(({ melid }, index) => [melid, index]));
 const soloLink = (melid: number) => `#solo-${melid}`;
+const catalogueForSolo = (index: number) => index >= FIRST_BODY_AND_SOUL ? "bodyAndSoul" : "blues";
 
 function soloFromLocation() {
   const match = /^#solo-(\d+)$/.exec(window.location.hash);
@@ -134,9 +145,9 @@ function decadeRange(years: number[]) {
 const compositionGroups = Object.entries(STYLES).map(([style, label]) => {
   const performers = new Map<string, { solo: JazzSolo; index: number }[]>();
   const years: number[] = [];
-  solos.forEach((solo, index) => {
+  bluesSolos.forEach((solo, index) => {
     if (solo.style !== style) return;
-    const year = weimarRecordings[solo.melid]?.recording_year;
+    const year = recordingForSolo(solo.melid)?.recording_year;
     if (year != null) years.push(year);
     const entries = performers.get(solo.performer) ?? [];
     entries.push({ solo, index });
@@ -152,6 +163,9 @@ function eraForSolo(index: number) {
 function App() {
   const [selectedSolo, setSelectedSolo] = useState(soloFromLocation);
   const [selectedEra, setSelectedEra] = useState(() => eraForSolo(selectedSolo));
+  const catalogue = catalogueForSolo(selectedSolo);
+  const lastSolo = useRef({ blues: INITIAL_SOLO, bodyAndSoul: FIRST_BODY_AND_SOUL,
+    [catalogue]: selectedSolo });
   const [noteHeight, setNoteHeight] = useState<number>(PITCH_STEP);
   const [timeSpacing, setTimeSpacing] = useState(DEFAULT_TIME_SPACING);
   const [recoloring, setRecoloring] = useState<{ melid: number; changes: TonicChange[] }>();
@@ -178,9 +192,9 @@ function App() {
   const soloData = useSoloData(melid, fileName);
   const audio = playbackBySolo[melid]?.audio;
   const score = useMemo(() => soloData?.beats.length
-    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart, soloData.chorusBars)
+    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart, soloData.chorusBars, soloData.formBars)
     : undefined, [soloData, key, audio?.scoreStart]);
-  const recording = weimarRecordings[melid];
+  const recording = recordingForSolo(melid);
   const changes = recoloring?.melid === melid ? recoloring.changes : NO_CHANGES;
   const heading = [instrumentName(instrument), recording?.recording_year].filter(Boolean).join(", ");
 
@@ -188,6 +202,7 @@ function App() {
     if (!window.location.hash) window.history.replaceState(window.history.state, "", soloLink(solos[INITIAL_SOLO].melid));
     const navigate = () => {
       const index = soloFromLocation();
+      lastSolo.current[catalogueForSolo(index)] = index;
       setSelectedSolo(index);
       setSelectedEra(eraForSolo(index));
       setTimeSpacing(DEFAULT_TIME_SPACING);
@@ -211,14 +226,29 @@ function App() {
   function seekRecording(scoreTime: number) {
     const media = audioRef.current;
     if (!audio || !media || !Number.isFinite(media.duration)) return;
-    const position = (scoreTime - audio.scoreStart) * audio.secondsPerScoreSecond;
+    const position = audioTimeAt(audio, scoreTime);
     media.currentTime = Math.min(media.duration, Math.max(0, position));
   }
 
+  function soloChoice(solo: JazzSolo, index: number, label: string) {
+    return (
+      <li key={solo.melid} className="composition-choice">
+        <a
+          href={soloLink(solo.melid)}
+          style={soloKey(solo).endsWith("-min") ? MINOR_BLUES_LINK_STYLE : undefined}
+          aria-current={index === selectedSolo ? "true" : undefined}
+        >
+          {label}
+        </a>
+      </li>
+    );
+  }
+
+  const inBlues = catalogue === "blues";
   return (
     <div className="solo-layout">
       <aside className="composition-pane" aria-label="Compositions">
-        <div className="composition-eras" role="group" aria-label="Era">
+        {inBlues && <div className="composition-eras" role="group" aria-label="Era">
           {compositionGroups.map((era) => (
             <button
               key={era.style}
@@ -233,33 +263,31 @@ function App() {
               {era.label}
             </button>
           ))}
-        </div>
+        </div>}
         <div className="composition-scroll" id="composition-list" ref={compositionScroll}>
-          {selectedEra.years && <b>{selectedEra.years}</b>}
+          {inBlues && selectedEra.years && <b>{selectedEra.years}</b>}
           <ul className="composition-performers" role="list">
-            {selectedEra.performers.map(([performer, entries]) => (
+            {inBlues ? selectedEra.performers.map(([performer, entries]) => (
               <li key={performer} className="composition-performer">
                 <span className="composition-performer-name">{performer}</span>
                 <ul className="composition-solos" role="list">
                   {entries.map(({ solo, index }) => {
                     const label = solo.solopart > 1 ? `${solo.title} (${solo.solopart})` : solo.title;
-                    return (
-                      <li key={solo.melid} className="composition-choice">
-                        <a
-                          href={soloLink(solo.melid)}
-                          style={soloKey(solo).endsWith("-min") ? MINOR_BLUES_LINK_STYLE : undefined}
-                          aria-current={index === selectedSolo ? "true" : undefined}
-                        >
-                          {label}
-                        </a>
-                      </li>
-                    );
+                    return soloChoice(solo, index, label);
                   })}
                 </ul>
               </li>
-            ))}
+            )) : bodyAndSoulSolos.map((solo, index) => {
+              const variant = solo.titleaddon || (solo.solopart > 1 ? solo.solopart : undefined);
+              const label = variant ? `${solo.performer} (${variant})` : solo.performer;
+              return soloChoice(solo, FIRST_BODY_AND_SOUL + index, label);
+            })}
           </ul>
         </div>
+        <nav className="composition-picker" aria-label="Catalogue">
+          <a href={soloLink(solos[lastSolo.current.blues].melid)} aria-current={inBlues ? "true" : undefined}>12</a>
+          <a href={soloLink(solos[lastSolo.current.bodyAndSoul].melid)} aria-current={inBlues ? undefined : "true"}>Body and Soul</a>
+        </nav>
       </aside>
       <main className="solo-main">
         <header className="solo-heading">
@@ -277,7 +305,7 @@ function App() {
         </header>
         {score && <>
           <SoloScore
-            key={fileName}
+            key={melid}
             score={score}
             changes={changes}
             onChangesChange={(next) => setRecoloring({ melid, changes: next })}
@@ -291,7 +319,7 @@ function App() {
           />
           {recording && <SoloMetadata key={melid} solo={solo} recording={recording} />}
         </>}
-        <SoloPianoLegend key={fileName} tonicKey={key} />
+        <SoloPianoLegend key={melid} tonicKey={key} />
       </main>
       <ScoreSizeSliders
         noteHeight={noteHeight}

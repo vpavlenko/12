@@ -12,10 +12,12 @@ import "./SoloScore.css";
 export const DEFAULT_TIME_SPACING = 25;
 
 function stackedRows(score: TonalScore, separatePickup: boolean) {
-  const starts = [0, ...score.chorusStarts.filter((start) => start > 0 && (separatePickup || start !== score.firstChorus))];
+  const sectionStarts = score.formStarts ?? score.chorusStarts;
+  const firstSection = score.formStarts?.[0] ?? score.firstChorus;
+  const starts = [0, ...sectionStarts.filter((start) => start > 0 && (separatePickup || start !== firstSection))];
   return starts.map((start, index) => {
     const end = starts[index + 1] ?? score.end;
-    const anchor = !separatePickup && index === 0 ? score.firstChorus ?? start : start;
+    const anchor = !separatePickup && index === 0 ? firstSection ?? start : start;
     return { start, end, anchor };
   });
 }
@@ -60,10 +62,11 @@ function placeChordLabels(anchors: number[], widths: number[], gap: number, avai
 
 type PlaybackPosition = RefObject<((time?: number) => void) | undefined>;
 
-function HarmonyHeader({ score, row, playbackPosition }: {
+function HarmonyHeader({ score, row, playbackPosition, inline }: {
   score: TonalScore;
   row: ScoreRow;
   playbackPosition?: PlaybackPosition;
+  inline?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const progressLine = useRef<HTMLDivElement>(null);
@@ -111,7 +114,7 @@ function HarmonyHeader({ score, row, playbackPosition }: {
   }, [chords]);
 
   return (
-    <div className={hasCountIn ? "solo-score-harmony solo-score-harmony-count-in" : "solo-score-harmony"} ref={ref} style={row.style}>
+    <div className={hasCountIn ? "solo-score-harmony solo-score-harmony-count-in" : "solo-score-harmony"} ref={ref} style={inline ? undefined : row.style}>
       {hasCountIn && <div className="solo-score-count-in" ref={progressLine} aria-hidden="true" hidden />}
       {chords.map(({ start, label, rootPitch, bassPitch, tooltip }) => (
         <div className="solo-score-chord" key={start} style={{ left: `calc(${percentOf(row, start)} + 5px)` }}>
@@ -145,10 +148,11 @@ type SectionProps = Pick<Props, "score" | "noteHeight" | "timeSpacing" | "onNote
   stickyHarmony?: boolean;
   playbackPosition?: PlaybackPosition;
   notation: RawlNotationProps;
+  inlineHarmony?: boolean;
 };
 
 function ScoreSection({
-  score, rows, scoreWidth, stickyHarmony, playbackPosition, notation,
+  score, rows, scoreWidth, stickyHarmony, playbackPosition, notation, inlineHarmony,
   noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange,
 }: SectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -171,7 +175,7 @@ function ScoreSection({
   }, []);
   return (
     <div className="solo-score-section">
-      <div
+      {!inlineHarmony && <div
         className={stickyHarmony ? "solo-score-harmony-viewport solo-score-sticky-harmony" : "solo-score-harmony-viewport"}
         ref={harmonyViewportRef}
         onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft, containerRef.current)}
@@ -179,7 +183,7 @@ function ScoreSection({
         <div ref={harmonyContentRef} style={{ width: scoreWidth }}>
           <HarmonyHeader score={score} row={rows[0]} playbackPosition={playbackPosition} />
         </div>
-      </div>
+      </div>}
       <div
         className="solo-score-scroll"
         ref={containerRef}
@@ -191,6 +195,8 @@ function ScoreSection({
             className="solo-score"
             style={{ width: scoreWidth }}
             rows={rows}
+            renderHeader={inlineHarmony ? (row) => <HarmonyHeader score={score} row={row} inline
+              playbackPosition={row === rows[0] ? playbackPosition : undefined} /> : undefined}
           />
         </ScorePinchContent>
       </div>
@@ -202,7 +208,8 @@ export default function SoloScore({
   changes, onChangesChange, playback, playbackPosition, onSeek, ...sizing
 }: Props) {
   const { score, noteHeight } = sizing;
-  const separatePickup = score.hasLongPickup && score.firstChorus !== undefined && score.firstChorus < score.end;
+  const firstSection = score.formStarts?.[0] ?? score.firstChorus;
+  const separatePickup = score.hasLongPickup && firstSection !== undefined && firstSection > 0 && firstSection < score.end;
   const [pickup, choruses] = useMemo(() => {
     const rows = stackedRows(score, separatePickup);
     return separatePickup
@@ -235,7 +242,8 @@ export default function SoloScore({
   return (
     <div className="solo-score-container">
       {pickup && <ScoreSection {...sizing} rows={pickup.rows} scoreWidth={scoreWidth(pickup.width)} notation={notation} />}
-      <ScoreSection {...sizing} rows={choruses.rows} scoreWidth={scoreWidth(choruses.width)} notation={notation} playbackPosition={playbackPosition} stickyHarmony />
+      <ScoreSection {...sizing} rows={choruses.rows} scoreWidth={scoreWidth(choruses.width)} notation={notation}
+        playbackPosition={playbackPosition} inlineHarmony={score.formStarts !== undefined} stickyHarmony />
     </div>
   );
 }

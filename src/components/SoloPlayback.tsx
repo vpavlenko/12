@@ -4,12 +4,7 @@ import { PlaybackFooter } from "librawl/components";
 import type { NotePlaybackClock } from "librawl/native";
 import "librawl/playback-footer.css";
 import { buildPlaybackTimeline, type TonalScore } from "../tonalScore";
-
-export type AudioExcerpt = {
-  path: string;
-  scoreStart: number;
-  secondsPerScoreSecond: number;
-};
+import { audioTimeAt, scoreTimeAt, type AudioExcerpt } from "../recordingClock";
 
 type SoloAudioProps = {
   excerpt: AudioExcerpt;
@@ -33,7 +28,7 @@ export function SoloAudio({ excerpt, playback, score, changes, audioRef }: SoloA
   const settings = useRef({ rate: 1, volume: 1 });
   const [media, setMedia] = useState<MediaState>();
   const timeline = useMemo(() => score && buildPlaybackTimeline(score, changes,
-    (time) => (time - excerpt.scoreStart) * excerpt.secondsPerScoreSecond), [score, changes, excerpt]);
+    (time) => audioTimeAt(excerpt, time)), [score, changes, excerpt]);
   const current = media?.path === excerpt.path ? media : undefined;
 
   const publishMedia = useCallback((audio: HTMLAudioElement) => {
@@ -55,7 +50,7 @@ export function SoloAudio({ excerpt, playback, score, changes, audioRef }: SoloA
     audio.volume = settings.current.volume;
     let frame = 0;
     const updateNotes = () => {
-      playback.advance(excerpt.scoreStart + audio.currentTime / excerpt.secondsPerScoreSecond);
+      playback.advance(scoreTimeAt(excerpt, audio.currentTime));
     };
     const publish = () => publishMedia(audio);
     const tick = () => {

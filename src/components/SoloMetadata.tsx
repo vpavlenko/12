@@ -172,6 +172,7 @@ export function SoloMetadata({ solo, recording }: { solo: JazzSolo; recording: W
     if (event.currentTarget.open) setAnnotations(true);
   };
   const key = accidentals(soloKey(solo)).replace(/-maj$/, " major").replace(/-min$/, " minor").replace(/-blues$/, " blues");
+  const title = [solo.title, solo.titleaddon].filter(Boolean).join(" ");
   const part = solo.solopart > 1 ? ` (${solo.solopart})` : "";
   return (
     <details className="solo-metadata">
@@ -186,7 +187,7 @@ export function SoloMetadata({ solo, recording }: { solo: JazzSolo; recording: W
           <h2 id="solo-metadata-heading">Metadata</h2>
           <a href={recording.source} target="_blank" rel="noreferrer">Weimar entry</a>
           <a href={`${import.meta.env.BASE_URL}midi/${solo.melid}.mid`}
-            download={`${solo.performer} - ${solo.title}${part}.mid`}>Expressive MIDI</a>
+            download={`${solo.performer} - ${title}${part}.mid`}>Expressive MIDI</a>
         </div>
         <div className="solo-metadata-groups">
           <Properties name="Recording" fields={[
@@ -198,7 +199,7 @@ export function SoloMetadata({ solo, recording }: { solo: JazzSolo; recording: W
             ["MusicBrainz", recording.mbzid ? <a href={`https://musicbrainz.org/recording/${recording.mbzid}`} target="_blank" rel="noreferrer">{recording.mbzid}</a> : undefined],
           ]} />
           <Properties name="Solo" fields={[
-            ["Piece", [solo.title, solo.titleaddon].filter(Boolean).join(" ")], ["Performer", solo.performer],
+            ["Piece", title], ["Performer", solo.performer],
             ["Instrument", instrumentName(solo.instrument)], ["Solo number", solo.solopart], ["Composer", solo.composer],
             ["Style", codeName(solo.style)], ["Genre", codeName(solo.genre)], ["Key", key], ["Meter", solo.signature],
             ["Mean tempo", `${numeral(solo.avgtempo)} bpm`], ["Tempo class", codeName(solo.tempoclass)], ["Feel", codeName(solo.rhythmfeel)],

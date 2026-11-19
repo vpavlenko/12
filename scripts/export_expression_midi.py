@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 
 from mido import Message, MetaMessage, MidiFile
 
-from track_midi_pitch import measured_curves
+from track_midi_pitch import audio_time, measured_curves
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,10 +30,6 @@ ORY_SOURCE = "https://openresearch.surrey.ac.uk/esploro/outputs/doctoral/Improvi
 
 def read_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def audio_time(seconds, alignment):
-    return (seconds - alignment["scoreStart"]) * alignment["secondsPerScoreSecond"]
 
 
 class BeatClock:
@@ -244,6 +240,7 @@ def main():
     corpus = [
         *read_json(ROOT / "data/wjd_maj_blues.json"),
         *read_json(ROOT / "data/wjd_minor_blues.json"),
+        *read_json(ROOT / "data/wjd_body_and_soul.json"),
     ]
     selected = set(args.solo or (solo["melid"] for solo in corpus))
     if selected - {solo["melid"] for solo in corpus}:

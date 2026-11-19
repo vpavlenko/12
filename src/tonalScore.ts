@@ -19,8 +19,11 @@ const WJD_CHORD_TYPES: Record<string, string> = {
   "j7911#": "maj9#11",
   sus7: "7sus4",
   sus7913: "13sus4",
+  "-j7": "mM7",
+  "-79": "m9",
   "79b": "7b9",
   "79#": "7#9",
+  "79b13b": "7b9b13",
   "+79#": "7#5#9",
   "7911#": "9#11",
   "7913b": "9b13",
@@ -180,7 +183,7 @@ function chordNotation(symbol: string, tonicName: string, tonic: number) {
 }
 
 export function buildTonalScore(
-  beats: BeatsItem[], melody: MelodyItem[], key: string, audioStart?: number, chorusBars: number[] = [],
+  beats: BeatsItem[], melody: MelodyItem[], key: string, audioStart?: number, chorusBars: number[] = [], formBars?: number[],
 ) {
   const tonicName = key.split("-")[0] || "C";
   const tonic = Note.chroma(tonicName) ?? 0;
@@ -195,7 +198,9 @@ export function buildTonalScore(
   const recordedEndTime = Math.max(lastNoteEnd, lastBeat.onset);
   const recordedMeasures = buildMeasures(renderedBeats, origin, recordedEndTime);
   const lastBar = recordedMeasures[recordedMeasures.length - 1]?.sourceNumber ?? 0;
-  const chorusLength = chorusBars.length > 1 ? chorusBars[1] - chorusBars[0] : 12;
+  const formSectionLength = formBars && (formBars.length > 1 ? formBars[1] - formBars[0] : 8);
+  const chorusLength = formSectionLength ? formSectionLength * 4
+    : chorusBars.length > 1 ? chorusBars[1] - chorusBars[0] : 12;
   const finalChorusBar = chorusBars[chorusBars.length - 1];
   const lastFullChorusBar = finalChorusBar === undefined ? Math.floor(lastBar / chorusLength) * chorusLength
     : finalChorusBar + chorusLength - 1 <= lastBar ? finalChorusBar + chorusLength - 1 : finalChorusBar - 1;
@@ -210,18 +215,24 @@ export function buildTonalScore(
   }));
   const lastNoteStart = notes.reduce((last, note) => Math.max(last, note.start), 0);
   const annotatedChoruses = new Set(chorusBars);
+  const annotatedForm = new Set(formBars);
   const phraseStarts: number[] = [];
   const chorusStarts: number[] = [];
-  const phraseLength = chorusLength / 3;
-  let chorusBar = 1;
+  const formStarts: number[] | undefined = formBars && [];
+  const phraseLength = formSectionLength ? formSectionLength / 2 : chorusLength / 3;
+  let phraseStartBar = 1;
   for (const { sourceNumber, start } of measures) {
     const beginsChorus = sourceNumber >= 1 && (annotatedChoruses.size > 0
       ? annotatedChoruses.has(sourceNumber) : (sourceNumber - 1) % chorusLength === 0);
     if (beginsChorus) {
-      chorusBar = sourceNumber;
       if (start <= lastNoteStart) chorusStarts.push(start);
+      if (!formBars) phraseStartBar = sourceNumber;
     }
-    if ((sourceNumber - chorusBar) % phraseLength === 0) phraseStarts.push(start);
+    if (annotatedForm.has(sourceNumber)) {
+      phraseStartBar = sourceNumber;
+      if (start < lastNoteEnd - origin) formStarts?.push(start);
+    }
+    if ((sourceNumber - phraseStartBar) % phraseLength === 0) phraseStarts.push(start);
   }
   const firstChorus = measures.find(({ sourceNumber }) => sourceNumber === 1)?.start;
   const hasLongPickup = measures.filter(({ sourceNumber }) => sourceNumber < 1).length > 1;
@@ -234,14 +245,15 @@ export function buildTonalScore(
   });
 
   const countInProgress = audioStart === undefined ? []
-    : buildCountInProgress(beats, measures, origin, firstRenderedBeat, audioStart, chorusLength);
-  return { notes, measures, tonic, end, origin, harmony, chorusStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, countInProgress };
+    : buildCountInProgress(beats, measures, origin, firstRenderedBeat, audioStart, formSectionLength ?? chorusLength);
+  return { notes, measures, tonic, end, origin, harmony, chorusStarts, formStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, countInProgress };
 }
 
 export type TonalScore = ReturnType<typeof buildTonalScore>;
 
 export function buildPlaybackTimeline(score: TonalScore, changes: TonicChange[], audioTime: (time: number) => number): PlaybackTimeline {
-  const sections = new Set(score.chorusStarts);
+  const sectionStarts = score.formStarts ?? score.chorusStarts;
+  const sections = new Set(sectionStarts);
   let previousTonic = score.tonic;
   const coloredMarks = changes.flatMap(({ beat, tonic }) => {
     const shift = mod(tonic - previousTonic);
@@ -249,7 +261,7 @@ export function buildPlaybackTimeline(score: TonalScore, changes: TonicChange[],
     return beat > 0 && shift ? [{ time: audioTime(score.origin + beat), color: RAWL_COLORS[shift].background }] : [];
   });
   return {
-    sections: score.chorusStarts.map((start) => audioTime(score.origin + start)),
+    sections: sectionStarts.map((start) => audioTime(score.origin + start)),
     phrases: score.phraseStarts.filter((start) => !sections.has(start)).map((start) => audioTime(score.origin + start)),
     coloredMarks,
     bassBars: score.notes.map(({ pitch, start, duration, playbackSpan }) => {

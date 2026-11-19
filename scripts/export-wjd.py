@@ -120,7 +120,11 @@ def main():
     if db.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
         parser.error('SQLite could not validate the source database.')
 
-    catalogs = args.catalog or [Path('data/wjd_maj_blues.json'), Path('data/wjd_minor_blues.json')]
+    catalogs = args.catalog or [
+        Path('data/wjd_maj_blues.json'),
+        Path('data/wjd_minor_blues.json'),
+        Path('data/wjd_body_and_soul.json'),
+    ]
     solos = [solo for path in catalogs for solo in json.loads(path.read_text(encoding='utf-8'))]
     if len({solo['melid'] for solo in solos}) != len(solos):
         parser.error('The catalog repeats a solo ID.')
