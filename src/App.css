@@ -115,7 +115,7 @@
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: inherit;
+  color: var(--composition-accent, inherit);
   font: inherit;
   text-align: start;
   text-decoration: none;
@@ -123,7 +123,7 @@
 }
 
 .composition-choice a:hover {
-  color: #fff;
+  color: var(--composition-accent, #fff);
 }
 
 .composition-choice a:focus {
@@ -136,7 +136,7 @@
 }
 
 .composition-choice a[aria-current] {
-  background: #eee;
+  background: var(--composition-accent, #eee);
   color: #111;
 }
 

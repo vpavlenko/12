@@ -8,6 +8,15 @@ export const annotatedSoloIds = new Set(minorBlues.map(({ melid }) => melid));
 export type WeimarRecording = typeof recordingData[keyof typeof recordingData];
 export const weimarRecordings: Record<string, WeimarRecording | undefined> = recordingData;
 
+const correctedKeys: Partial<Record<number, string>> = {
+  // Redman's 12-bar progression uses D7#9 as I and A7#9 as V.
+  245: "D-blues",
+};
+
+export function soloKey(solo: JazzSolo) {
+  return correctedKeys[solo.melid] ?? solo.key;
+}
+
 const instruments: Record<string, string> = {
   arr: "arranger",
   as: "alto saxophone",

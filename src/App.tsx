@@ -4,10 +4,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 import "./App.css";
 import playbackData from "../data/playback.json";
-import type { TonicChange } from "librawl";
+import { RAWL_COLORS, type TonicChange } from "librawl";
 import { useNotePlaybackClock } from "librawl/native";
 import { ScoreSizeSliders } from "librawl/components";
 import { PITCH_STEP } from "librawl/geometry";
@@ -18,7 +19,7 @@ import { SoloAudio, type AudioExcerpt } from "./components/SoloPlayback";
 import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
 import { buildTonalScore, type BeatsItem, type MelodyItem } from "./tonalScore";
-import { annotatedSoloIds, instrumentName, solos, weimarRecordings, type JazzSolo } from "./weimar";
+import { annotatedSoloIds, instrumentName, soloKey, solos, weimarRecordings, type JazzSolo } from "./weimar";
 
 const STYLES = {
   TRADITIONAL: "trad",
@@ -31,6 +32,8 @@ const STYLES = {
 };
 
 const INITIAL_SOLO = 1;
+const MAJOR_SIXTH_SEMITONES = 9;
+const MINOR_BLUES_LINK_STYLE = { "--composition-accent": RAWL_COLORS[MAJOR_SIXTH_SEMITONES].background } as CSSProperties;
 
 const playbackBySolo: Record<string, { audio?: AudioExcerpt } | undefined> = playbackData;
 const NO_CHANGES: TonicChange[] = [];
@@ -169,7 +172,8 @@ function App() {
   const compositionScroll = useRef<HTMLDivElement>(null);
 
   const solo = solos[selectedSolo];
-  const { key, instrument, melid } = solo;
+  const { instrument, melid } = solo;
+  const key = soloKey(solo);
   const fileName = makeFileName(solo);
   const soloData = useSoloData(melid, fileName);
   const audio = playbackBySolo[melid]?.audio;
@@ -243,6 +247,7 @@ function App() {
                       <li key={solo.melid} className="composition-choice">
                         <a
                           href={soloLink(solo.melid)}
+                          style={soloKey(solo).endsWith("-min") ? MINOR_BLUES_LINK_STYLE : undefined}
                           aria-current={index === selectedSolo ? "true" : undefined}
                         >
                           {label}

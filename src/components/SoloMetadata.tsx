@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode, type SyntheticEvent } from "react";
 import { Note } from "tonal";
-import { instrumentName, type JazzSolo, type WeimarRecording } from "../weimar";
+import { instrumentName, soloKey, type JazzSolo, type WeimarRecording } from "../weimar";
 import "./SoloMetadata.css";
 
 type Cell = string | number | null | undefined;
@@ -171,7 +171,7 @@ export function SoloMetadata({ solo, recording }: { solo: JazzSolo; recording: W
   const showAnnotations = (event: SyntheticEvent<HTMLDetailsElement>) => {
     if (event.currentTarget.open) setAnnotations(true);
   };
-  const key = accidentals(solo.key).replace(/-maj$/, " major").replace(/-min$/, " minor");
+  const key = accidentals(soloKey(solo)).replace(/-maj$/, " major").replace(/-min$/, " minor").replace(/-blues$/, " blues");
   const part = solo.solopart > 1 ? ` (${solo.solopart})` : "";
   return (
     <details className="solo-metadata">
