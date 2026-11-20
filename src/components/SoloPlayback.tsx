@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { TonicChange } from "librawl";
+import { bindMediaPlaybackPosition } from "librawl/audio";
 import { PlaybackFooter } from "librawl/components";
 import type { NotePlaybackClock } from "librawl/native";
 import "librawl/playback-footer.css";
@@ -48,50 +49,19 @@ export function SoloAudio({ excerpt, playback, score, changes, audioRef }: SoloA
     if (!audio) return;
     audio.playbackRate = settings.current.rate;
     audio.volume = settings.current.volume;
-    let frame = 0;
-    const updateNotes = () => {
-      playback.advance(scoreTimeAt(excerpt, audio.currentTime));
-    };
+    const unbindPosition = bindMediaPlaybackPosition(audio, (time) => {
+      if (time === null) playback.reset();
+      else playback.advance(scoreTimeAt(excerpt, time));
+    });
     const publish = () => publishMedia(audio);
-    const tick = () => {
-      updateNotes();
-      if (!audio.paused && !audio.ended && !audio.error) frame = requestAnimationFrame(tick);
-    };
-    const start = () => {
-      cancelAnimationFrame(frame);
-      tick();
-      publish();
-    };
-    const stop = () => {
-      cancelAnimationFrame(frame);
-      updateNotes();
-      publish();
-    };
-    const seeked = () => {
-      updateNotes();
-      publish();
-    };
-    const reset = () => {
-      cancelAnimationFrame(frame);
-      playback.reset();
-    };
-    const fail = () => {
-      reset();
-      publish();
-    };
-
-    const listeners = {
-      play: start, pause: stop, ended: stop, seeked, error: fail,
-      loadedmetadata: publish, durationchange: publish, seeking: publish,
-      volumechange: publish, ratechange: publish,
-    };
-    for (const [event, listener] of Object.entries(listeners)) audio.addEventListener(event, listener);
-    if (!audio.paused) start();
-    else publish();
+    const events = ["play", "pause", "ended", "seeking", "seeked", "error",
+      "loadedmetadata", "durationchange", "volumechange", "ratechange"];
+    for (const event of events) audio.addEventListener(event, publish);
+    publish();
     return () => {
-      for (const [event, listener] of Object.entries(listeners)) audio.removeEventListener(event, listener);
+      for (const event of events) audio.removeEventListener(event, publish);
+      unbindPosition();
       audio.pause();
-      reset();
     };
   }, [audioRef, excerpt, playback, publishMedia]);
 
