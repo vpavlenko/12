@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { RawlNotation, useTonicRecoloring, type RawlNotationProps, type ScoreRow, type TonicChange } from "librawl";
 import { RomanNumeral, ScorePinchContent, useScorePinch } from "librawl/components";
 import { alignScoreRows, PITCH_STEP } from "librawl/geometry";
@@ -157,16 +157,19 @@ type SectionProps = Pick<Props, "score" | "noteHeight" | "timeSpacing" | "onNote
   playbackPosition?: PlaybackPosition;
   notation: RawlNotationProps;
   inlineHarmony?: boolean;
+  editedRows: ScoreRow[] | null;
+  onSectionRowsChange: NonNullable<RawlNotationProps["onSectionRowsChange"]>;
 };
 
 function ScoreSection({
   score, rows, scoreWidth, stickyHarmony, playbackPosition, notation, inlineHarmony,
-  noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange,
+  editedRows, onSectionRowsChange, noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange,
 }: SectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const harmonyViewportRef = useRef<HTMLDivElement>(null);
   const harmonyContentRef = useRef<HTMLDivElement>(null);
   const pinchActive = useScorePinch(containerRef, noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange);
+  const showInlineHarmony = inlineHarmony || editedRows !== null;
 
   useLayoutEffect(() => {
     const scoreContent = containerRef.current?.querySelector<HTMLElement>("[data-score-pinch-content]");
@@ -180,10 +183,10 @@ function ScoreSection({
     const observer = new MutationObserver(syncPreview);
     observer.observe(scoreContent, { attributes: true, attributeFilter: ["style"] });
     return () => observer.disconnect();
-  }, []);
+  }, [showInlineHarmony]);
   return (
     <div className="solo-score-section">
-      {!inlineHarmony && <div
+      {!showInlineHarmony && <div
         className={stickyHarmony ? "solo-score-harmony-viewport solo-score-sticky-harmony" : "solo-score-harmony-viewport"}
         ref={harmonyViewportRef}
         onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft, containerRef.current)}
@@ -203,8 +206,9 @@ function ScoreSection({
             className="solo-score"
             style={{ width: scoreWidth }}
             rows={rows}
-            renderHeader={inlineHarmony ? (row) => <HarmonyHeader score={score} row={row} inline
-              playbackPosition={row === rows[0] ? playbackPosition : undefined} /> : undefined}
+            onSectionRowsChange={onSectionRowsChange}
+            renderHeader={showInlineHarmony ? (row) => <HarmonyHeader score={score} row={row} inline
+              playbackPosition={row.start === rows[0].start ? playbackPosition : undefined} /> : undefined}
           />
         </ScorePinchContent>
       </div>
@@ -217,6 +221,8 @@ export default function SoloScore({
 }: Props) {
   const { score, noteHeight } = sizing;
   const scoreContainer = useRef<HTMLDivElement>(null);
+  const [editedPickupRows, setEditedPickupRows] = useState<ScoreRow[] | null>(null);
+  const [editedChorusRows, setEditedChorusRows] = useState<ScoreRow[] | null>(null);
   const firstSection = score.formStarts?.[0] ?? score.firstChorus;
   const separatePickup = score.hasLongPickup && firstSection !== undefined && firstSection > 0 && firstSection < score.end;
   const [pickup, choruses] = useMemo(() => {
@@ -226,7 +232,7 @@ export default function SoloScore({
       : [undefined, alignScoreRows(rows)];
   }, [score, separatePickup]);
   const longestSection = Math.max(pickup?.width ?? 0, choruses.width);
-  useLayoutEffect(() => fitChordLabels(scoreContainer.current!), [score]);
+  useLayoutEffect(() => fitChordLabels(scoreContainer.current!), [score, editedPickupRows, editedChorusRows]);
   const zoom = sizing.timeSpacing / DEFAULT_TIME_SPACING;
   const scoreWidth = (duration: number) => `${100 * (duration / longestSection) * zoom}%`;
   const recoloring = useTonicRecoloring({ changes, onChange: onChangesChange, measureMap: score.measures });
@@ -251,8 +257,10 @@ export default function SoloScore({
 
   return (
     <div className="solo-score-container" ref={scoreContainer}>
-      {pickup && <ScoreSection {...sizing} rows={pickup.rows} scoreWidth={scoreWidth(pickup.width)} notation={notation} />}
+      {pickup && <ScoreSection {...sizing} rows={pickup.rows} scoreWidth={scoreWidth(pickup.width)} notation={notation}
+        editedRows={editedPickupRows} onSectionRowsChange={setEditedPickupRows} />}
       <ScoreSection {...sizing} rows={choruses.rows} scoreWidth={scoreWidth(choruses.width)} notation={notation}
+        editedRows={editedChorusRows} onSectionRowsChange={setEditedChorusRows}
         playbackPosition={playbackPosition} inlineHarmony={score.formStarts !== undefined} stickyHarmony />
     </div>
   );
