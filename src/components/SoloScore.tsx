@@ -13,7 +13,7 @@ export const DEFAULT_TIME_SPACING = 25;
 const CHORD_LABEL_SCALE = 0.63;
 
 function stackedRows(score: TonalScore, separatePickup: boolean) {
-  const sectionStarts = score.rowStarts ?? score.formStarts ?? score.chorusStarts;
+  const sectionStarts = score.formStarts ?? score.chorusStarts;
   const firstSection = score.formStarts?.[0] ?? score.firstChorus;
   const starts = [0, ...sectionStarts.filter((start) => start > 0 && (separatePickup || start !== firstSection))];
   return starts.map((start, index) => {

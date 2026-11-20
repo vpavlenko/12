@@ -15,7 +15,7 @@ on [wjazzd.db](https://jazzomat.hfm-weimar.de/dbformat/dboverview.html)
 
 The Body and Soul catalogue includes every solo joined to composition ID 75 in the same database.
 The Rhythm Changes catalogue uses every solo with `composition_info.template = 'I Got Rhythm'`.
-Both catalogues place the second A and the bridge on the same score row.
+Both catalogues give each AABA section its own score row.
 
 [Recording metadata](data/wjd_recordings.json) and [annotations](public/wjd) come from the
 [Weimar Jazz Database v2.1](https://jazzomat.hfm-weimar.de/download/download.html)

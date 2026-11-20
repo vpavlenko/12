@@ -96,15 +96,12 @@ async function loadSoloData(melid: number, fileName: string, signal: AbortSignal
         choruses.set(chorus_id, bar);
       }
     }
-    const rhythmChanges = rhythmChangesSoloIds.has(melid);
-    const sections = rhythmChanges || bodyAndSoulSoloIds.has(melid)
+    const sections = rhythmChangesSoloIds.has(melid) || bodyAndSoulSoloIds.has(melid)
       ? beats.filter(({ bar, beat, form }) => beat === 1 && form
         && (/^\*?[ABC]\d+$/.test(form) || (bar > 0 && /^I\d+$/.test(form))))
       : undefined;
     const formBars = sections?.map(({ bar }) => bar);
-    const rowBars = sections?.filter(({ form }, index) =>
-      sections[index - 1]?.form !== "A2" || !/^\*?B/.test(form ?? "")).map(({ bar }) => bar);
-    return { beats, melody: notes, chorusBars: [...choruses.values()], formBars, rowBars };
+    return { beats, melody: notes, chorusBars: [...choruses.values()], formBars };
   }
 
   const [melody, beats] = await Promise.all([

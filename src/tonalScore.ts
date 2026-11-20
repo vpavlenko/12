@@ -180,7 +180,6 @@ function chordNotation(symbol: string, tonic: number) {
 export type ScoreForm = {
   chorusBars?: number[];
   formBars?: number[];
-  rowBars?: number[];
   barsPerMeasure?: number;
 };
 
@@ -201,7 +200,7 @@ function groupMeasures(beats: BeatsItem[], barsPerMeasure: number) {
 
 export function buildTonalScore(
   beats: BeatsItem[], melody: MelodyItem[], key: string, audioStart?: number,
-  { chorusBars: sourceChorusBars = [], formBars: sourceFormBars, rowBars: sourceRowBars, barsPerMeasure = 1 }: ScoreForm = {},
+  { chorusBars: sourceChorusBars = [], formBars: sourceFormBars, barsPerMeasure = 1 }: ScoreForm = {},
 ) {
   const tonicName = key.split("-")[0] || "C";
   const tonic = Note.chroma(tonicName) ?? 0;
@@ -213,7 +212,6 @@ export function buildTonalScore(
   const toMeasure = (bar: number) => groupedBar(bar, barsPerMeasure);
   const chorusBars = sourceChorusBars.map(toMeasure);
   const formBars = sourceFormBars?.map(toMeasure);
-  const rowBars = sourceRowBars?.map(toMeasure);
   const firstRenderedBeat = firstRenderedBeatIndex(metricBeats, firstNote);
   const renderedBeats = metricBeats.slice(firstRenderedBeat);
   const origin = Math.min(firstNote, renderedBeats[0].onset);
@@ -240,11 +238,9 @@ export function buildTonalScore(
   const lastNoteStart = notes.reduce((last, note) => Math.max(last, note.start), 0);
   const annotatedChoruses = new Set(chorusBars);
   const annotatedForm = new Set(formBars);
-  const annotatedRows = new Set(rowBars);
   const phraseStarts: number[] = [];
   const chorusStarts: number[] = [];
   const formStarts: number[] | undefined = formBars && [];
-  const rowStarts: number[] | undefined = rowBars && [];
   const phraseLength = formSectionLength ? formSectionLength / 2 : chorusLength / 3;
   let phraseStartBar = 1;
   for (const { sourceNumber, start } of measures) {
@@ -256,10 +252,7 @@ export function buildTonalScore(
     }
     if (annotatedForm.has(sourceNumber)) {
       phraseStartBar = sourceNumber;
-      if (start < lastNoteEnd - origin) {
-        formStarts?.push(start);
-        if (annotatedRows.has(sourceNumber)) rowStarts?.push(start);
-      }
+      if (start < lastNoteEnd - origin) formStarts?.push(start);
     }
     if ((sourceNumber - phraseStartBar) % phraseLength === 0) phraseStarts.push(start);
   }
@@ -275,7 +268,7 @@ export function buildTonalScore(
 
   const countInProgress = audioStart === undefined ? []
     : buildCountInProgress(metricBeats, measures, origin, firstRenderedBeat, audioStart, formSectionLength ?? chorusLength);
-  return { notes, measures, tonic, end, origin, harmony, chorusStarts, formStarts, rowStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, countInProgress };
+  return { notes, measures, tonic, end, origin, harmony, chorusStarts, formStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, countInProgress };
 }
 
 export type TonalScore = ReturnType<typeof buildTonalScore>;
