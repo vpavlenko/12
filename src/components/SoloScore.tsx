@@ -10,6 +10,7 @@ import { countInProgressAt, type TonalScore } from "../tonalScore";
 import "./SoloScore.css";
 
 export const DEFAULT_TIME_SPACING = 25;
+const CHORD_LABEL_SCALE = 0.9;
 
 function stackedRows(score: TonalScore, separatePickup: boolean) {
   const sectionStarts = score.rowStarts ?? score.formStarts ?? score.chorusStarts;
@@ -73,10 +74,11 @@ function fitChordLabels(container: HTMLDivElement) {
       const required = widths.reduce((sum, value) => sum + value) + (labels.length - 1) * gap;
       return [{ width, labels, widths, anchors, scale: width / required }];
     });
-    const scale = rows.reduce((limit, row) => Math.min(limit, row.scale), 1);
+    const fittedScale = rows.reduce((limit, row) => Math.min(limit, row.scale), 1);
+    const scale = fittedScale * CHORD_LABEL_SCALE;
     container.style.setProperty("--solo-chord-scale", String(scale));
     for (const { width, labels, widths, anchors } of rows) {
-      const positions = placeChordLabels(anchors.map((anchor) => anchor + 4), widths.map((value) => value * scale), gap * scale, width);
+      const positions = placeChordLabels(anchors.map((anchor) => anchor + 4), widths.map((value) => value * scale), gap * fittedScale, width);
       labels.forEach((label, index) => {
         label.style.setProperty("--solo-chord-offset", `${positions[index] - anchors[index]}px`);
       });
