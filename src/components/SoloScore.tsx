@@ -10,7 +10,7 @@ import { countInProgressAt, type TonalScore } from "../tonalScore";
 import "./SoloScore.css";
 
 export const DEFAULT_TIME_SPACING = 25;
-const CHORD_LABEL_SCALE = 0.9;
+const CHORD_LABEL_SCALE = 0.63;
 
 function stackedRows(score: TonalScore, separatePickup: boolean) {
   const sectionStarts = score.rowStarts ?? score.formStarts ?? score.chorusStarts;

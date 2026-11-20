@@ -24,10 +24,6 @@
   z-index: 18;
 }
 
-.solo-score .rawln-measure-number {
-  top: 3px;
-}
-
 .solo-score-harmony {
   position: relative;
   min-height: 30px;
