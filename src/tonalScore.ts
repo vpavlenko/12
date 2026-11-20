@@ -1,7 +1,8 @@
 import { RAWL_COLORS, type MidiNote, type SourceMeasure, type TonicChange } from "librawl";
 import type { PlaybackTimeline } from "librawl/components";
 import { mod, tonicAt } from "librawl/geometry";
-import { Chord, Interval, Note, Progression } from "tonal";
+import { ROMAN_NUMERAL_DEGREES } from "librawl/roman-numerals";
+import { Chord, Interval, Note } from "tonal";
 
 export type MelodyItem = { pitch: number; onset: number; duration: number };
 
@@ -142,32 +143,23 @@ export function countInProgressAt(score: TonalScore, time: number) {
   return { start: bar[0].position, end: previous.position + fraction * (next.position - previous.position) };
 }
 
-function romanNumeral(tonic: string, root: string, quality = "") {
-  const [numeral] = Progression.toRomanNumerals(tonic, [root + quality]);
-  if (/^(?:bb|##)/.test(numeral)) {
-    const [enharmonic] = Progression.toRomanNumerals(tonic, [Note.enharmonic(root) + quality]);
-    if (!/^(?:bb|##)/.test(enharmonic)) return enharmonic;
-  }
-  return numeral;
-}
-
-function chordNotation(symbol: string, tonicName: string, tonic: number) {
+function chordNotation(symbol: string, tonic: number) {
   const [chord, bass] = symbol.split("/");
   const [, root, type] = /^([A-G][b#]?)(.*)$/.exec(chord) ?? [];
-  if (!root) return { label: symbol };
+  const rootChroma = root ? Note.chroma(root) : null;
+  if (rootChroma === null) return { label: symbol };
   const quality = WJD_CHORD_TYPES[type] ?? type;
   const normalized = root + quality;
-  const rootChroma = Note.chroma(root);
   const bassChroma = bass ? Note.chroma(bass) : null;
-  const rootNotation = romanNumeral(tonicName, root, quality);
-  const bassNotation = bass ? romanNumeral(tonicName, bass) : undefined;
-  const rootPitch = rootChroma === null ? undefined : mod(rootChroma - tonic);
+  const rootPitch = mod(rootChroma - tonic);
   const bassPitch = bassChroma === null ? undefined : mod(bassChroma - tonic);
+  const rootNotation = ROMAN_NUMERAL_DEGREES[rootPitch] + quality;
+  const bassNotation = bassPitch === undefined ? undefined : ROMAN_NUMERAL_DEGREES[bassPitch];
   const chordIntervals = Chord.get(normalized).intervals.map(Interval.semitones);
-  const rootPitches = rootPitch === undefined ? [] : chordIntervals.map((interval) => rootPitch + interval);
+  const rootPitches = chordIntervals.map((interval) => rootPitch + interval);
   const inversion = rootPitches.findIndex((pitch) => mod(pitch) === bassPitch);
   let pitches = rootPitches;
-  if (bassPitch !== undefined && rootPitch !== undefined && rootPitches.length > 0) {
+  if (bassPitch !== undefined && rootPitches.length > 0) {
     if (inversion >= 0) {
       const lowest = rootPitches[inversion];
       pitches = rootPitches.map((pitch) =>
@@ -278,7 +270,7 @@ export function buildTonalScore(
   const harmony = symbols.flatMap(({ chord, start }, index) => {
     if (chord === "NC") return [];
     const stop = symbols[index + 1]?.start ?? end;
-    return stop - start > EPSILON ? [{ ...chordNotation(chord, tonicName, tonic), start, end: stop }] : [];
+    return stop - start > EPSILON ? [{ ...chordNotation(chord, tonic), start, end: stop }] : [];
   });
 
   const countInProgress = audioStart === undefined ? []
