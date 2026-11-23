@@ -126,9 +126,9 @@ function HarmonyHeader({ score, row, playbackPosition, inline }: {
   return (
     <div className={hasCountIn ? "solo-score-harmony solo-score-harmony-count-in" : "solo-score-harmony"} style={inline ? undefined : row.style}>
       {hasCountIn && <div className="solo-score-count-in" ref={progressLine} aria-hidden="true" hidden />}
-      {chords.map(({ start, label, rootPitch, bassPitch, tooltip }) => (
+      {chords.map(({ start, label, rootPitch, tooltip }) => (
         <div className="solo-score-chord" key={start} style={{ left: percentOf(row, start) }}>
-          <RomanNumeral notation={label} options={{ jazz: true, font: "sans-serif", rootPitch, bassPitch }} tooltip={tooltip ?? true} />
+          <RomanNumeral notation={label} options={{ jazz: true, font: "sans-serif", rootPitch }} tooltip={tooltip ?? true} />
         </div>
       ))}
     </div>

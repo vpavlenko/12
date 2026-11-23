@@ -147,14 +147,13 @@ function chordNotation(symbol: string, tonic: number) {
   const [chord, bass] = symbol.split("/");
   const [, root, type] = /^([A-G][b#]?)(.*)$/.exec(chord) ?? [];
   const rootChroma = root ? Note.chroma(root) : null;
-  if (rootChroma === null) return { label: symbol };
+  if (rootChroma === null) return { label: chord };
   const quality = WJD_CHORD_TYPES[type] ?? type;
   const normalized = root + quality;
   const bassChroma = bass ? Note.chroma(bass) : null;
   const rootPitch = mod(rootChroma - tonic);
   const bassPitch = bassChroma === null ? undefined : mod(bassChroma - tonic);
   const rootNotation = ROMAN_NUMERAL_DEGREES[rootPitch] + quality;
-  const bassNotation = bassPitch === undefined ? undefined : ROMAN_NUMERAL_DEGREES[bassPitch];
   const chordIntervals = Chord.get(normalized).intervals.map(Interval.semitones);
   const rootPitches = chordIntervals.map((interval) => rootPitch + interval);
   const inversion = rootPitches.findIndex((pitch) => mod(pitch) === bassPitch);
@@ -170,9 +169,8 @@ function chordNotation(symbol: string, tonic: number) {
     }
   }
   return {
-    label: [rootNotation, bassNotation].filter(Boolean).join("/"),
+    label: rootNotation,
     rootPitch,
-    bassPitch,
     tooltip: pitches.length ? { pitches, rootPitches, rootNotation, inversion: Math.max(0, inversion) } : undefined,
   };
 }
