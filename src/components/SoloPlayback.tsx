@@ -12,6 +12,7 @@ type SoloAudioProps = {
   playback: NotePlaybackClock;
   score?: TonalScore;
   changes: TonicChange[];
+  phraseStarts?: number[];
   audioRef: RefObject<HTMLAudioElement | null>;
 };
 
@@ -25,11 +26,12 @@ type MediaState = {
   failed: boolean;
 };
 
-export function SoloAudio({ excerpt, playback, score, changes, audioRef }: SoloAudioProps) {
+export function SoloAudio({ excerpt, playback, score, changes, phraseStarts, audioRef }: SoloAudioProps) {
   const settings = useRef({ rate: 1, volume: 1 });
   const [media, setMedia] = useState<MediaState>();
-  const timeline = useMemo(() => score && buildPlaybackTimeline(score, changes,
-    (time) => audioTimeAt(excerpt, time)), [score, changes, excerpt]);
+  const timeline = useMemo(() => score && buildPlaybackTimeline(
+    { ...score, phraseStarts: phraseStarts ?? score.phraseStarts }, changes,
+    (time) => audioTimeAt(excerpt, time)), [score, changes, phraseStarts, excerpt]);
   const current = media?.path === excerpt.path ? media : undefined;
 
   const publishMedia = useCallback((audio: HTMLAudioElement) => {

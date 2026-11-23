@@ -11,6 +11,7 @@ export type SoloAnnotation = {
   scoreOrigin: number;
   tonicChanges?: TonicChange[];
   sectionStarts?: SectionStarts;
+  phraseStarts?: number[];
 };
 
 export function tonicAnnotation(changes: TonicChange[]) {
@@ -30,13 +31,16 @@ function isTonicChange(value: unknown): value is TonicChange {
     && (change.name === undefined || typeof change.name === "string");
 }
 
+function isOrderedStarts(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((beat, index) => Number.isFinite(beat) && (index === 0 || beat > value[index - 1]));
+}
+
 function isSectionStarts(value: unknown): value is SectionStarts {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const sections = value as SectionStarts;
   return (sections.pickup !== undefined || sections.choruses !== undefined)
     && [sections.pickup, sections.choruses].every((starts) => starts === undefined
-    || (Array.isArray(starts) && starts.length > 0
-      && starts.every((beat, index) => Number.isFinite(beat) && (index === 0 || beat > starts[index - 1]))));
+    || (isOrderedStarts(starts) && starts.length > 0));
 }
 
 function parseAnnotation(key: string, json: string) {
@@ -47,7 +51,8 @@ function parseAnnotation(key: string, json: string) {
     if (saved.tonicChanges !== undefined
       && (!Array.isArray(saved.tonicChanges) || !saved.tonicChanges.every(isTonicChange))) return undefined;
     if (saved.sectionStarts !== undefined && !isSectionStarts(saved.sectionStarts)) return undefined;
-    return saved.tonicChanges !== undefined || saved.sectionStarts ? saved : undefined;
+    if (saved.phraseStarts !== undefined && !isOrderedStarts(saved.phraseStarts)) return undefined;
+    return saved.tonicChanges !== undefined || saved.sectionStarts || saved.phraseStarts ? saved : undefined;
   } catch {
     return undefined;
   }

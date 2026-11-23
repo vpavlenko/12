@@ -232,6 +232,9 @@ function App() {
   const recording = recordingForSolo(melid);
   const annotation = annotations.get(melid);
   const changes = annotation?.tonicChanges ?? score?.tonicChanges ?? NO_CHANGES;
+  const savedPhrases = annotation?.phraseStarts;
+  const phraseStarts = useMemo(() => score && (savedPhrases?.every((beat) =>
+    score.measures.some((measure) => measure.start === beat)) ? savedPhrases : score.phraseStarts), [score, savedPhrases]);
   const heading = [instrumentName(instrument), recording?.recording_year].filter(Boolean).join(", ");
 
   useEffect(() => {
@@ -270,7 +273,7 @@ function App() {
     const current = latestAnnotations.current.get(melid);
     const next: SoloAnnotation = { ...current, version: 1, soloId: melid, scoreOrigin: score.origin };
     edit(next);
-    const saved = next.tonicChanges !== undefined || next.sectionStarts ? next : undefined;
+    const saved = next.tonicChanges !== undefined || next.sectionStarts || next.phraseStarts ? next : undefined;
     if (JSON.stringify(current) === JSON.stringify(saved)) return;
     const updated = new Map(latestAnnotations.current);
     if (saved) updated.set(melid, saved);
@@ -285,6 +288,15 @@ function App() {
     const base = tonicAnnotation(score?.tonicChanges ?? NO_CHANGES);
     updateAnnotation((annotation) => {
       annotation.tonicChanges = JSON.stringify(saved) === JSON.stringify(base) ? undefined : saved;
+    });
+  }
+
+  function commitPhraseStarts(starts: number[]) {
+    if (!score) return;
+    // The closing bar is a display boundary rather than a phrase start.
+    const phrases = starts.filter((beat) => beat !== score.terminalBar);
+    updateAnnotation((annotation) => {
+      annotation.phraseStarts = JSON.stringify(phrases) === JSON.stringify(score.phraseStarts) ? undefined : phrases;
     });
   }
 
@@ -383,6 +395,8 @@ function App() {
             onChangesChange={commitTonicChanges}
             sectionStarts={annotation?.sectionStarts}
             onSectionStartsChange={commitSectionStarts}
+            phraseStarts={phraseStarts}
+            onPhraseStartsChange={commitPhraseStarts}
             playback={playback}
             playbackPosition={playbackPosition}
             onNoteClick={audition.play}
@@ -404,7 +418,8 @@ function App() {
         onTimeSpacingChange={setTimeSpacing}
         keyboardShortcuts
       />
-      {audio && <SoloAudio excerpt={audio} playback={playback} score={score} changes={changes} audioRef={audioRef} />}
+      {audio && <SoloAudio excerpt={audio} playback={playback} score={score} changes={changes}
+        phraseStarts={phraseStarts} audioRef={audioRef} />}
     </div>
   );
 }

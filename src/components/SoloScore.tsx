@@ -170,6 +170,8 @@ type Props = {
   changes: TonicChange[];
   onChangesChange: (changes: TonicChange[]) => void;
   sectionStarts?: SectionStarts;
+  phraseStarts?: number[];
+  onPhraseStartsChange: (starts: number[]) => void;
   onSectionStartsChange: (group: SectionGroup, starts: number[] | undefined) => void;
   playback: NotePlaybackClock;
   playbackPosition: PlaybackPosition;
@@ -261,7 +263,8 @@ function ScoreSection({
 }
 
 export default function SoloScore({
-  changes, onChangesChange, sectionStarts, onSectionStartsChange, playback, playbackPosition, onSeek, onNoteClick, ...sizing
+  changes, onChangesChange, sectionStarts, onSectionStartsChange,
+  phraseStarts: editedPhraseStarts, onPhraseStartsChange, playback, playbackPosition, onSeek, onNoteClick, ...sizing
 }: Props) {
   const { score, noteHeight } = sizing;
   const scoreContainer = useRef<HTMLDivElement>(null);
@@ -278,8 +281,10 @@ export default function SoloScore({
   const zoom = sizing.timeSpacing / DEFAULT_TIME_SPACING;
   const scoreWidth = (duration: number) => `${100 * (duration / longestSection) * zoom}%`;
   const recoloring = useTonicRecoloring({ changes, onChange: onChangesChange, measureMap: score.measures });
-  const phraseStarts = useMemo(() => score.terminalBar === undefined
-    ? score.phraseStarts : [...score.phraseStarts, score.terminalBar], [score]);
+  const phraseStarts = useMemo(() => {
+    const starts = editedPhraseStarts ?? score.phraseStarts;
+    return score.terminalBar === undefined || starts.includes(score.terminalBar) ? starts : [...starts, score.terminalBar];
+  }, [score, editedPhraseStarts]);
   const seek = (position: number) => (onSeek ?? playback.advance)(score.origin + position);
   const notation: RawlNotationProps = {
     beats: score.end,
@@ -287,6 +292,7 @@ export default function SoloScore({
     tonic: score.tonic,
     measureMap: score.measures,
     phraseStarts,
+    onPhraseStartsChange,
     playbackClock: playback,
     recoloring,
     onSeek: seek,
