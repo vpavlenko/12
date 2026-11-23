@@ -32,6 +32,10 @@ const WJD_CHORD_TYPES: Record<string, string> = {
   "7913": "13",
 };
 
+const CIRCLED_DEGREES: Record<string, string> = {
+  I: "①", II: "②", III: "③", IV: "④", V: "⑤", VI: "⑥", VII: "⑦",
+};
+
 type Measure = SourceMeasure & { sourceNumber: number; beatPositions: number[] };
 type TimedNote = MidiNote & { playbackSpan: [start: number, end: number] };
 type PickupBeat = { time: number; position: number };
@@ -168,10 +172,19 @@ function chordNotation(symbol: string, tonic: number) {
       pitches = [bassPitch > rootPitch ? bassPitch - 12 : bassPitch, ...rootPitches];
     }
   }
+  const tooltipBass = bassPitch === undefined ? undefined : {
+    label: ROMAN_NUMERAL_DEGREES[bassPitch].replace(/[IV]+$/, (degree) => CIRCLED_DEGREES[degree]),
+    pitch: bassPitch,
+    caption: `${bass.replace("b", "♭").replace("#", "♯")} bass`,
+  };
   return {
     label: rootNotation,
     rootPitch,
-    tooltip: pitches.length ? { pitches, rootPitches, rootNotation, inversion: Math.max(0, inversion) } : undefined,
+    tooltip: pitches.length ? {
+      pitches, rootPitches, rootNotation,
+      inversion: bassPitch === undefined ? 0 : inversion < 0 ? undefined : inversion,
+      bass: tooltipBass,
+    } : undefined,
   };
 }
 
