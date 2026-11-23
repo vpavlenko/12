@@ -21,7 +21,7 @@ import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
 import { buildTonalScore, type BeatsItem, type MelodyItem, type ScoreForm } from "./tonalScore";
 import {
-  annotatedSoloIds, barsPerMeasureBySolo, bluesSolos, bodyAndSoulSoloIds, bodyAndSoulSolos,
+  annotatedSoloIds, barsPerMeasureBySolo, bluesSolos, bodyAndSoulSoloIds, bodyAndSoulSolos, excerptTonalityBySolo,
   instrumentName, recordingForSolo, rhythmChangesSoloIds, rhythmChangesSolos, soloKey, solos, type JazzSolo,
 } from "./weimar";
 
@@ -201,15 +201,16 @@ function App() {
   const solo = solos[selectedSolo];
   const { instrument, melid } = solo;
   const barsPerMeasure = barsPerMeasureBySolo[melid];
+  const excerptTonality = excerptTonalityBySolo[melid];
   const key = soloKey(solo);
   const fileName = makeFileName(solo);
   const soloData = useSoloData(melid, fileName);
   const audio = playbackBySolo[melid]?.audio;
   const score = useMemo(() => soloData?.beats.length
-    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart, { ...soloData, barsPerMeasure })
-    : undefined, [soloData, key, audio?.scoreStart, barsPerMeasure]);
+    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart, { ...soloData, barsPerMeasure, excerptTonality })
+    : undefined, [soloData, key, audio?.scoreStart, barsPerMeasure, excerptTonality]);
   const recording = recordingForSolo(melid);
-  const changes = recoloring?.melid === melid ? recoloring.changes : NO_CHANGES;
+  const changes = recoloring?.melid === melid ? recoloring.changes : score?.tonicChanges ?? NO_CHANGES;
   const heading = [instrumentName(instrument), recording?.recording_year].filter(Boolean).join(", ");
 
   useEffect(() => {
@@ -338,7 +339,8 @@ function App() {
           />
           {recording && <SoloMetadata key={melid} solo={solo} recording={recording} />}
         </>}
-        <SoloPianoLegend key={melid} tonicKey={key} />
+        <SoloPianoLegend key={melid} tonicKey={excerptTonality?.openingTonic ?? key}
+          score={excerptTonality ? score : undefined} changes={changes} playback={playback} />
       </main>
       <ScoreSizeSliders
         noteHeight={noteHeight}

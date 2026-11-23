@@ -4,6 +4,7 @@ import bodyAndSoul from "../data/wjd_body_and_soul.json";
 import rhythmChanges from "../data/wjd_rhythm_changes.json";
 import measureGroups from "../data/measure_groups.json";
 import recordingData from "../data/wjd_recordings.json";
+import type { ExcerptTonality } from "./tonalScore";
 
 export type JazzSolo = typeof majorBlues[number];
 export const bluesSolos: JazzSolo[] = [...majorBlues, ...minorBlues].sort((a, b) => a.melid - b.melid);
@@ -14,6 +15,13 @@ export const bodyAndSoulSoloIds = new Set(bodyAndSoulSolos.map(({ melid }) => me
 export const rhythmChangesSoloIds = new Set(rhythmChangesSolos.map(({ melid }) => melid));
 export const annotatedSoloIds = new Set([...minorBlues, ...bodyAndSoulSolos, ...rhythmChangesSolos].map(({ melid }) => melid));
 export const barsPerMeasureBySolo: Partial<Record<number, number>> = measureGroups;
+export const excerptTonalityBySolo: Partial<Record<number, ExcerptTonality>> = {
+  // Murray's excerpt starts on Dmaj7, turns to C via Dm7–G7, then returns to the D-flat A.
+  119: {
+    openingTonic: "D",
+    modulations: [{ bar: -3, tonic: "C" }, { bar: 1, tonic: "Db" }],
+  },
+};
 export type WeimarRecording = typeof recordingData[keyof typeof recordingData];
 const weimarRecordings: Record<string, WeimarRecording | undefined> = recordingData;
 

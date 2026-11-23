@@ -183,6 +183,11 @@ export type ScoreForm = {
   barsPerMeasure?: number;
 };
 
+export type ExcerptTonality = {
+  openingTonic: string;
+  modulations: { bar: number; tonic: string }[];
+};
+
 function groupedBar(bar: number, barsPerMeasure: number) {
   return Math.floor((bar - 1) / barsPerMeasure) + 1;
 }
@@ -200,9 +205,10 @@ function groupMeasures(beats: BeatsItem[], barsPerMeasure: number) {
 
 export function buildTonalScore(
   beats: BeatsItem[], melody: MelodyItem[], key: string, audioStart?: number,
-  { chorusBars: sourceChorusBars = [], formBars: sourceFormBars, barsPerMeasure = 1 }: ScoreForm = {},
+  { chorusBars: sourceChorusBars = [], formBars: sourceFormBars, barsPerMeasure = 1, excerptTonality }:
+    ScoreForm & { excerptTonality?: ExcerptTonality } = {},
 ) {
-  const tonicName = key.split("-")[0] || "C";
+  const tonicName = excerptTonality?.openingTonic ?? key.split("-")[0];
   const tonic = Note.chroma(tonicName) ?? 0;
   const transcribed = melody.filter(({ pitch, onset, duration }) =>
     Number.isFinite(pitch) && Number.isFinite(onset) && Number.isFinite(duration) && duration > EPSILON);
@@ -259,16 +265,24 @@ export function buildTonalScore(
   const firstChorus = measures.find(({ sourceNumber }) => sourceNumber === 1)?.start;
   const hasLongPickup = measures.filter(({ sourceNumber }) => sourceNumber < 1).length > 1;
   const terminalBar = trailingRest >= 0 || (lastMetricBeat.beat === 1 && lastMetricBeat.onset === recordedEndTime) ? end : undefined;
+  const tonicChanges: TonicChange[] = (excerptTonality?.modulations ?? []).flatMap(({ bar, tonic: name }) => {
+    const onset = beats.find((item) => item.bar === bar && item.beat === 1)?.onset;
+    const pitchClass = Note.chroma(name);
+    if (onset === undefined || pitchClass === null || onset < origin || onset >= origin + end) return [];
+    return [{ beat: onset - origin, tonic: pitchClass }];
+  }).sort((a, b) => a.beat - b.beat);
   const symbols = beats.flatMap(({ chord, onset }) => chord && onset - origin < end ? [{ chord, start: onset - origin }] : []);
   const harmony = symbols.flatMap(({ chord, start }, index) => {
     if (chord === "NC") return [];
     const stop = symbols[index + 1]?.start ?? end;
-    return stop - start > EPSILON ? [{ ...chordNotation(chord, tonic), start, end: stop }] : [];
+    return stop - start > EPSILON
+      ? [{ ...chordNotation(chord, tonicAt(tonic, tonicChanges, start + EPSILON)), start, end: stop }]
+      : [];
   });
 
   const countInProgress = audioStart === undefined ? []
     : buildCountInProgress(metricBeats, measures, origin, firstRenderedBeat, audioStart, formSectionLength ?? chorusLength);
-  return { notes, measures, tonic, end, origin, harmony, chorusStarts, formStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, countInProgress };
+  return { notes, measures, tonic, tonicChanges, end, origin, harmony, chorusStarts, formStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, countInProgress };
 }
 
 export type TonalScore = ReturnType<typeof buildTonalScore>;
