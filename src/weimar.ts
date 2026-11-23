@@ -16,13 +16,14 @@ export const rhythmChangesSoloIds = new Set(rhythmChangesSolos.map(({ melid }) =
 export const annotatedSoloIds = new Set([...minorBlues, ...bodyAndSoulSolos, ...rhythmChangesSolos].map(({ melid }) => melid));
 export const barsPerMeasureBySolo: Partial<Record<number, number>> = measureGroups;
 
-// Source event IDs for pickups into the bridge and the return to A.
+// Source event IDs for pickups into either half of the bridge and the return to A.
 const modulationPickups: Partial<Record<number, Record<number, number>>> = {
   85: { 17: 37272, 25: 37326 },
+  86: { 5: 37427 },
   96: { 17: 41893, 49: 42221 },
-  118: { 25: 54497 },
-  140: { 25: 62823 },
-  206: { 17: 90360, 49: 90870 },
+  118: { 21: 54439, 25: 54497 },
+  140: { 21: 62768, 25: 62823, 53: 63160 },
+  206: { 17: 90360, 49: 90870, 53: 90951 },
   220: { 33: 99617, 49: 99723 },
   393: { 25: 174819 },
   398: { 25: 176981, 41: 177149 },
@@ -50,10 +51,11 @@ export function bodyAndSoulTonality(melid: number, sections: { bar: number; form
   const pickups = modulationPickups[melid];
   const modulations: ExcerptTonality["modulations"] = sections.flatMap(({ bar, form }) => {
     if (!bridge.test(form ?? "")) return [];
+    const midpointBar = bar + 4 * barsPerMeasure;
     const returnBar = bar + 8 * barsPerMeasure;
     return [
       { bar, offset: 1, pickupEvent: pickups?.[bar] },
-      { bar: bar + 4 * barsPerMeasure, offset: -1 },
+      { bar: midpointBar, offset: -1, pickupEvent: pickups?.[midpointBar] },
       { bar: returnBar, offset: 0, pickupEvent: pickups?.[returnBar] },
     ];
   });
