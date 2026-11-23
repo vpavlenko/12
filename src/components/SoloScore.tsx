@@ -248,12 +248,8 @@ export default function SoloScore({
     measureMap: score.measures,
     phraseStarts,
     playbackClock: playback,
-    changes: recoloring.changes,
-    selectedMeasure: recoloring.selectedMeasure,
-    onMeasureSelect: recoloring.selectMeasure,
-    onNoteHover: recoloring.hoverNote,
+    recoloring,
     onSeek: seek,
-    onNote: recoloring.selectedMeasure === null ? undefined : recoloring.chooseNote,
     noteScale: noteHeight / PITCH_STEP,
   };
 
