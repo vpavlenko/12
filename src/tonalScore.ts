@@ -288,7 +288,7 @@ export function buildTonalScore(
   });
 
   const countInProgress = audioStart === undefined ? []
-    : buildCountInProgress(metricBeats, measures, origin, firstRenderedBeat, audioStart, formSectionLength ?? chorusLength);
+    : buildCountInProgress(metricBeats, measures, origin, firstRenderedBeat, audioStart, chorusLength);
   return { notes, measures, tonic, tonicChanges, end, origin, harmony, chorusStarts, formStarts, phraseStarts, firstChorus, hasLongPickup, terminalBar, countInProgress };
 }
 

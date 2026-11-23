@@ -93,7 +93,11 @@ function fitChordLabels(container: HTMLDivElement) {
   return () => observer.disconnect();
 }
 
-type PlaybackPosition = RefObject<((time?: number) => void) | undefined>;
+export type ScorePlaybackPosition = {
+  time?: number;
+  listeners: Set<(time?: number) => void>;
+};
+type PlaybackPosition = RefObject<ScorePlaybackPosition>;
 
 function HarmonyHeader({ score, row, playbackPosition, inline }: {
   score: TonalScore;
@@ -103,25 +107,31 @@ function HarmonyHeader({ score, row, playbackPosition, inline }: {
 }) {
   const progressLine = useRef<HTMLDivElement>(null);
   const chords = useMemo(() => harmonyInRow(score, row), [score, row]);
-  const hasCountIn = !!playbackPosition && score.countInProgress.length > 0;
+  const hasCountIn = !!playbackPosition && score.countInProgress.some((points) =>
+    points[0].position < row.end - 1e-7 && points[points.length - 1].position > row.start + 1e-7);
 
   useLayoutEffect(() => {
     const line = progressLine.current;
     if (!playbackPosition || !line) return;
     const rowDuration = row.end - row.start;
-    playbackPosition.current = (time) => {
+    const paint = (time?: number) => {
       const progress = time === undefined ? undefined : countInProgressAt(score, time);
-      if (!progress || progress.start < row.start || progress.end > row.end) {
+      const start = Math.max(row.start, progress?.start ?? row.end);
+      const end = Math.min(row.end, progress?.end ?? row.start);
+      if (start >= end) {
         if (!line.hidden) line.hidden = true;
         return;
       }
-      const left = 100 * (progress.start - row.start) / rowDuration;
-      const width = (progress.end - progress.start) / rowDuration;
+      const left = 100 * (start - row.start) / rowDuration;
+      const width = (end - start) / rowDuration;
       line.style.transform = `translateX(${left}%) scaleX(${width})`;
       if (line.hidden) line.hidden = false;
     };
-    return () => { playbackPosition.current = undefined; };
-  }, [playbackPosition, row, score]);
+    const { listeners, time } = playbackPosition.current;
+    listeners.add(paint);
+    paint(time);
+    return () => { listeners.delete(paint); };
+  }, [hasCountIn, playbackPosition, row, score]);
 
   return (
     <div className={hasCountIn ? "solo-score-harmony solo-score-harmony-count-in" : "solo-score-harmony"} style={inline ? undefined : row.style}>
@@ -210,7 +220,7 @@ function ScoreSection({
             rows={rows}
             onSectionRowsChange={onSectionRowsChange}
             renderHeader={showInlineHarmony ? (row) => <HarmonyHeader score={score} row={row} inline
-              playbackPosition={row.start === rows[0].start ? playbackPosition : undefined} /> : undefined}
+              playbackPosition={playbackPosition} /> : undefined}
           />
         </ScorePinchContent>
       </div>

@@ -14,7 +14,7 @@ import { ScoreSizeSliders } from "librawl/components";
 import { PITCH_STEP } from "librawl/geometry";
 import "librawl/score-size-sliders.css";
 import Papa from "papaparse";
-import SoloScore, { DEFAULT_TIME_SPACING } from "./components/SoloScore";
+import SoloScore, { DEFAULT_TIME_SPACING, type ScorePlaybackPosition } from "./components/SoloScore";
 import { SoloAudio } from "./components/SoloPlayback";
 import { audioTimeAt, type AudioExcerpt } from "./recordingClock";
 import { SoloPianoLegend } from "./components/SoloPianoLegend";
@@ -184,18 +184,24 @@ function App() {
   const [timeSpacing, setTimeSpacing] = useState(DEFAULT_TIME_SPACING);
   const [recoloring, setRecoloring] = useState<{ melid: number; changes: TonicChange[] }>();
   const notePlayback = useNotePlaybackClock();
-  const playbackPosition = useRef<((time?: number) => void) | undefined>(undefined);
-  const playback = useMemo(() => ({
-    register: notePlayback.register,
-    advance(time: number) {
-      notePlayback.advance(time);
-      playbackPosition.current?.(time);
-    },
-    reset() {
-      notePlayback.reset();
-      playbackPosition.current?.();
-    },
-  }), [notePlayback]);
+  const playbackPosition = useRef<ScorePlaybackPosition>({ listeners: new Set() });
+  const playback = useMemo(() => {
+    const publish = (time?: number) => {
+      playbackPosition.current.time = time;
+      playbackPosition.current.listeners.forEach((paint) => paint(time));
+    };
+    return {
+      register: notePlayback.register,
+      advance(time: number) {
+        notePlayback.advance(time);
+        publish(time);
+      },
+      reset() {
+        notePlayback.reset();
+        publish();
+      },
+    };
+  }, [notePlayback]);
   const audioRef = useRef<HTMLAudioElement>(null);
   const compositionScroll = useRef<HTMLDivElement>(null);
 
