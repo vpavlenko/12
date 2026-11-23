@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode, type SyntheticEvent } from "react";
 import { Note } from "tonal";
+import type { SoloAnnotation } from "../soloAnnotations";
 import { instrumentName, soloKey, type JazzSolo, type WeimarRecording } from "../weimar";
 import "./SoloMetadata.css";
 
@@ -165,7 +166,11 @@ function AnnotationDetails({ melid }: { melid: number }) {
   </>;
 }
 
-export function SoloMetadata({ solo, recording }: { solo: JazzSolo; recording: WeimarRecording }) {
+export function SoloMetadata({ solo, recording, localAnnotation }: {
+  solo: JazzSolo;
+  recording: WeimarRecording;
+  localAnnotation?: SoloAnnotation;
+}) {
   const [annotations, setAnnotations] = useState(false);
   const lineup = recording.lineup ? soloLineup(recording.lineup) : [];
   const showAnnotations = (event: SyntheticEvent<HTMLDetailsElement>) => {
@@ -174,7 +179,7 @@ export function SoloMetadata({ solo, recording }: { solo: JazzSolo; recording: W
   const key = accidentals(soloKey(solo)).replace(/-maj$/, " major").replace(/-min$/, " minor").replace(/-blues$/, " blues");
   const title = [solo.title, solo.titleaddon].filter(Boolean).join(" ");
   const part = solo.solopart > 1 ? ` (${solo.solopart})` : "";
-  return (
+  const metadata = (
     <details className="solo-metadata">
       <summary className="solo-metadata-toggle" aria-label="Metadata" title="Metadata">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
@@ -218,5 +223,19 @@ export function SoloMetadata({ solo, recording }: { solo: JazzSolo; recording: W
         </details>
       </section>
     </details>
+  );
+  return (
+    <div className="solo-metadata-area">
+      {metadata}
+      {localAnnotation && <a className="solo-local-annotation" title="Local annotation" aria-label="Download annotation"
+        download={`solo-${solo.melid}-annotation.json`}
+        href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(localAnnotation, null, 2))}`}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M13 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5" />
+          <path d="M17 4a2.1 2.1 0 0 1 3 3l-8 8-4 1 1-4zM15 6l3 3" />
+        </svg>
+      </a>}
+    </div>
   );
 }

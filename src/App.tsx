@@ -20,6 +20,7 @@ import { createScoreNoteAudition } from "./components/scoreNoteAudition";
 import { audioTimeAt, type AudioExcerpt } from "./recordingClock";
 import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
+import { readSoloAnnotations, tonicAnnotation, writeSoloAnnotation, type SectionGroup, type SoloAnnotation } from "./soloAnnotations";
 import { buildTonalScore, type BeatsItem, type MelodyItem, type ScoreForm } from "./tonalScore";
 import {
   annotatedSoloIds, barsPerMeasureBySolo, bluesSolos, bodyAndSoulSoloIds, bodyAndSoulSolos, bodyAndSoulTonality,
@@ -191,7 +192,8 @@ function App() {
   });
   const [noteHeight, setNoteHeight] = useState<number>(PITCH_STEP);
   const [timeSpacing, setTimeSpacing] = useState(DEFAULT_TIME_SPACING);
-  const [recoloring, setRecoloring] = useState<{ melid: number; changes: TonicChange[] }>();
+  const [annotations, setAnnotations] = useState(readSoloAnnotations);
+  const latestAnnotations = useRef(annotations);
   const notePlayback = useNotePlaybackClock();
   const playbackPosition = useRef<ScorePlaybackPosition>({ listeners: new Set() });
   const playback = useMemo(() => {
@@ -228,7 +230,8 @@ function App() {
     ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart, { ...soloData, barsPerMeasure })
     : undefined, [soloData, key, audio?.scoreStart, barsPerMeasure]);
   const recording = recordingForSolo(melid);
-  const changes = recoloring?.melid === melid ? recoloring.changes : score?.tonicChanges ?? NO_CHANGES;
+  const annotation = annotations.get(melid);
+  const changes = annotation?.tonicChanges ?? score?.tonicChanges ?? NO_CHANGES;
   const heading = [instrumentName(instrument), recording?.recording_year].filter(Boolean).join(", ");
 
   useEffect(() => {
@@ -239,7 +242,6 @@ function App() {
       setSelectedSolo(index);
       setSelectedEra(eraForSolo(index));
       setTimeSpacing(DEFAULT_TIME_SPACING);
-      setRecoloring(undefined);
       window.scrollTo(0, 0);
     };
     window.addEventListener("hashchange", navigate);
@@ -261,6 +263,38 @@ function App() {
     if (!audio || !media || !Number.isFinite(media.duration)) return;
     const position = audioTimeAt(audio, scoreTime);
     media.currentTime = Math.min(media.duration, Math.max(0, position));
+  }
+
+  function updateAnnotation(edit: (annotation: SoloAnnotation) => void) {
+    if (!score) return;
+    const current = latestAnnotations.current.get(melid);
+    const next: SoloAnnotation = { ...current, version: 1, soloId: melid, scoreOrigin: score.origin };
+    edit(next);
+    const saved = next.tonicChanges !== undefined || next.sectionStarts ? next : undefined;
+    if (JSON.stringify(current) === JSON.stringify(saved)) return;
+    const updated = new Map(latestAnnotations.current);
+    if (saved) updated.set(melid, saved);
+    else updated.delete(melid);
+    writeSoloAnnotation(melid, saved);
+    latestAnnotations.current = updated;
+    setAnnotations(updated);
+  }
+
+  function commitTonicChanges(next: TonicChange[]) {
+    const saved = tonicAnnotation(next);
+    const base = tonicAnnotation(score?.tonicChanges ?? NO_CHANGES);
+    updateAnnotation((annotation) => {
+      annotation.tonicChanges = JSON.stringify(saved) === JSON.stringify(base) ? undefined : saved;
+    });
+  }
+
+  function commitSectionStarts(group: SectionGroup, starts: number[] | undefined) {
+    updateAnnotation((annotation) => {
+      const sections = { ...annotation.sectionStarts };
+      if (starts) sections[group] = starts;
+      else delete sections[group];
+      annotation.sectionStarts = sections.pickup || sections.choruses ? sections : undefined;
+    });
   }
 
   function soloChoice(solo: JazzSolo, index: number, label: string) {
@@ -346,7 +380,9 @@ function App() {
             key={melid}
             score={score}
             changes={changes}
-            onChangesChange={(next) => setRecoloring({ melid, changes: next })}
+            onChangesChange={commitTonicChanges}
+            sectionStarts={annotation?.sectionStarts}
+            onSectionStartsChange={commitSectionStarts}
             playback={playback}
             playbackPosition={playbackPosition}
             onNoteClick={audition.play}
@@ -356,10 +392,10 @@ function App() {
             onTimeSpacingChange={setTimeSpacing}
             onSeek={audio ? seekRecording : undefined}
           />
-          {recording && <SoloMetadata key={melid} solo={solo} recording={recording} />}
+          {recording && <SoloMetadata key={melid} solo={solo} recording={recording} localAnnotation={annotation} />}
         </>}
         <SoloPianoLegend key={melid} tonicKey={key}
-          score={score?.tonicChanges.length ? score : undefined} changes={changes} playback={playback} />
+          score={changes.length ? score : undefined} changes={changes} playback={playback} />
       </main>
       <ScoreSizeSliders
         noteHeight={noteHeight}

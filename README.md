@@ -26,6 +26,14 @@ Each solo has a shareable `#solo-<melid>` link.
 To regenerate the metadata from the official SQLite download, run
 `python3 scripts/export-wjd.py /path/to/wjazzd.db`.
 
+## Local annotations
+
+Committed tonic edits and section boundaries are saved per solo in browser
+localStorage under `12:solo-annotation:<melid>`. The pencil beside Info downloads
+the same versioned JSON record for backporting. Tonic onsets, measure anchors,
+and section starts are in score-relative seconds. Add `scoreOrigin` to locate
+them on the source transcription clock.
+
 ## Recordings
 
 Each solo plays the matching AAC excerpt from `public/audio/`.

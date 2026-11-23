@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { RawlNotation, useTonicRecoloring, type MidiNote, type RawlNotationProps, type ScoreRow, type TonicChange } from "librawl";
 import { RomanNumeral, ScorePinchContent, useScorePinch } from "librawl/components";
 import { alignScoreRows, PITCH_STEP } from "librawl/geometry";
@@ -7,6 +7,7 @@ import "librawl/style.css";
 import "librawl/native.css";
 import "librawl/roman-numerals.css";
 import { countInProgressAt, type TonalScore } from "../tonalScore";
+import type { SectionGroup, SectionStarts } from "../soloAnnotations";
 import "./SoloScore.css";
 
 export const DEFAULT_TIME_SPACING = 25;
@@ -21,6 +22,21 @@ function stackedRows(score: TonalScore, separatePickup: boolean) {
     const anchor = !separatePickup && index === 0 ? firstSection ?? start : start;
     return { start, end, anchor };
   });
+}
+
+function sameSectionStarts(rows: ScoreRow[], starts: number[]) {
+  return rows.length === starts.length && rows.every((row, index) => row.start === starts[index]);
+}
+
+function restoreSectionRows(score: TonalScore, rows: ScoreRow[], starts: number[] | undefined) {
+  const end = rows[rows.length - 1].end;
+  if (!starts || starts[0] !== rows[0].start || starts[starts.length - 1] >= end
+    || sameSectionStarts(rows, starts)
+    || starts.slice(1).some((start) => !score.measures.some((measure) => measure.start === start))) return rows;
+  const authored = new Map(rows.map((row) => [row.start, row]));
+  return alignScoreRows(starts.map((start, index) => ({
+    ...authored.get(start), start, end: starts[index + 1] ?? end,
+  }))).rows;
 }
 
 const percentOf = (row: ScoreRow, beat: number) => `${(beat - row.start) / (row.end - row.start) * 100}%`;
@@ -153,6 +169,8 @@ type Props = {
   score: TonalScore;
   changes: TonicChange[];
   onChangesChange: (changes: TonicChange[]) => void;
+  sectionStarts?: SectionStarts;
+  onSectionStartsChange: (group: SectionGroup, starts: number[] | undefined) => void;
   playback: NotePlaybackClock;
   playbackPosition: PlaybackPosition;
   noteHeight: number;
@@ -163,26 +181,39 @@ type Props = {
   onNoteClick: (note: MidiNote) => void;
 };
 
-type SectionProps = Pick<Props, "score" | "noteHeight" | "timeSpacing" | "onNoteHeightChange" | "onTimeSpacingChange"> & {
+type SectionProps = Pick<Props, "score" | "noteHeight" | "timeSpacing" | "onNoteHeightChange" | "onTimeSpacingChange" | "onSectionStartsChange"> & {
   rows: ScoreRow[];
   scoreWidth: string;
   stickyHarmony?: boolean;
   playbackPosition?: PlaybackPosition;
   notation: RawlNotationProps;
   inlineHarmony?: boolean;
-  editedRows: ScoreRow[] | null;
-  onSectionRowsChange: NonNullable<RawlNotationProps["onSectionRowsChange"]>;
+  group: SectionGroup;
+  savedStarts?: number[];
 };
 
 function ScoreSection({
   score, rows, scoreWidth, stickyHarmony, playbackPosition, notation, inlineHarmony,
-  editedRows, onSectionRowsChange, noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange,
+  group, savedStarts, onSectionStartsChange, noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange,
 }: SectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const harmonyViewportRef = useRef<HTMLDivElement>(null);
   const harmonyContentRef = useRef<HTMLDivElement>(null);
   const pinchActive = useScorePinch(containerRef, noteHeight, timeSpacing, onNoteHeightChange, onTimeSpacingChange);
-  const showInlineHarmony = inlineHarmony || editedRows !== null;
+  // Librawl edits the mounted rows. Keep the loaded layout stable across later saves.
+  const [initialRows] = useState(() => restoreSectionRows(score, rows, savedStarts));
+  const [edited, setEdited] = useState(initialRows !== rows);
+  const lastRows = useRef(initialRows);
+  const showInlineHarmony = inlineHarmony || edited;
+  const onSectionRowsChange = useCallback((next: ScoreRow[] | null) => {
+    const visibleRows = next ?? initialRows;
+    if (lastRows.current === visibleRows) return;
+    lastRows.current = visibleRows;
+    const starts = visibleRows.map(({ start }) => start);
+    const custom = !sameSectionStarts(rows, starts);
+    setEdited(custom);
+    onSectionStartsChange(group, custom ? starts : undefined);
+  }, [group, initialRows, onSectionStartsChange, rows]);
 
   useLayoutEffect(() => {
     const scoreContent = containerRef.current?.querySelector<HTMLElement>("[data-score-pinch-content]");
@@ -218,7 +249,7 @@ function ScoreSection({
             {...notation}
             className="solo-score"
             style={{ width: scoreWidth }}
-            rows={rows}
+            rows={initialRows}
             onSectionRowsChange={onSectionRowsChange}
             renderHeader={showInlineHarmony ? (row) => <HarmonyHeader score={score} row={row} inline
               playbackPosition={playbackPosition} /> : undefined}
@@ -230,12 +261,10 @@ function ScoreSection({
 }
 
 export default function SoloScore({
-  changes, onChangesChange, playback, playbackPosition, onSeek, onNoteClick, ...sizing
+  changes, onChangesChange, sectionStarts, onSectionStartsChange, playback, playbackPosition, onSeek, onNoteClick, ...sizing
 }: Props) {
   const { score, noteHeight } = sizing;
   const scoreContainer = useRef<HTMLDivElement>(null);
-  const [editedPickupRows, setEditedPickupRows] = useState<ScoreRow[] | null>(null);
-  const [editedChorusRows, setEditedChorusRows] = useState<ScoreRow[] | null>(null);
   const firstSection = score.formStarts?.[0] ?? score.firstChorus;
   const separatePickup = score.hasLongPickup && firstSection !== undefined && firstSection > 0 && firstSection < score.end;
   const [pickup, choruses] = useMemo(() => {
@@ -245,7 +274,7 @@ export default function SoloScore({
       : [undefined, alignScoreRows(rows)];
   }, [score, separatePickup]);
   const longestSection = Math.max(pickup?.width ?? 0, choruses.width);
-  useLayoutEffect(() => fitChordLabels(scoreContainer.current!), [score, editedPickupRows, editedChorusRows]);
+  useLayoutEffect(() => fitChordLabels(scoreContainer.current!), [score, sectionStarts]);
   const zoom = sizing.timeSpacing / DEFAULT_TIME_SPACING;
   const scoreWidth = (duration: number) => `${100 * (duration / longestSection) * zoom}%`;
   const recoloring = useTonicRecoloring({ changes, onChange: onChangesChange, measureMap: score.measures });
@@ -271,9 +300,9 @@ export default function SoloScore({
   return (
     <div className="solo-score-container" ref={scoreContainer}>
       {pickup && <ScoreSection {...sizing} rows={pickup.rows} scoreWidth={scoreWidth(pickup.width)} notation={notation}
-        editedRows={editedPickupRows} onSectionRowsChange={setEditedPickupRows} />}
+        group="pickup" savedStarts={sectionStarts?.pickup} onSectionStartsChange={onSectionStartsChange} />}
       <ScoreSection {...sizing} rows={choruses.rows} scoreWidth={scoreWidth(choruses.width)} notation={notation}
-        editedRows={editedChorusRows} onSectionRowsChange={setEditedChorusRows}
+        group="choruses" savedStarts={sectionStarts?.choruses} onSectionStartsChange={onSectionStartsChange}
         playbackPosition={playbackPosition} inlineHarmony={score.formStarts !== undefined} stickyHarmony />
     </div>
   );

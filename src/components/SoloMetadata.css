@@ -1,5 +1,22 @@
-.solo-metadata {
+.solo-metadata-area {
+  position: relative;
   margin-block: 12px 0;
+}
+
+.solo-local-annotation {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 24px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: #aaa;
+}
+
+.solo-local-annotation:is(:hover, :focus-visible) { color: #fff; }
+
+.solo-metadata {
   font-size: 13px;
   line-height: 1.4;
   overflow-wrap: anywhere;
