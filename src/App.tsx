@@ -16,6 +16,7 @@ import "librawl/score-size-sliders.css";
 import Papa from "papaparse";
 import SoloScore, { DEFAULT_TIME_SPACING, type ScorePlaybackPosition } from "./components/SoloScore";
 import { SoloAudio } from "./components/SoloPlayback";
+import { createScoreNoteAudition } from "./components/scoreNoteAudition";
 import { audioTimeAt, type AudioExcerpt } from "./recordingClock";
 import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
@@ -215,6 +216,9 @@ function App() {
 
   const solo = solos[selectedSolo];
   const { instrument, melid } = solo;
+  const audition = useMemo(createScoreNoteAudition, []);
+  useLayoutEffect(() => audition.cancel, [audition, melid]);
+  useEffect(() => audition.dispose, [audition]);
   const barsPerMeasure = barsPerMeasureBySolo[melid];
   const key = soloKey(solo);
   const fileName = makeFileName(solo);
@@ -345,6 +349,7 @@ function App() {
             onChangesChange={(next) => setRecoloring({ melid, changes: next })}
             playback={playback}
             playbackPosition={playbackPosition}
+            onNoteClick={audition.play}
             noteHeight={noteHeight}
             timeSpacing={timeSpacing}
             onNoteHeightChange={setNoteHeight}

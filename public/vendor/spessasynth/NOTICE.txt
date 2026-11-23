@@ -1,0 +1,16 @@
+SpessaSynth browser assets reused from the Insights Roadmaps reader.
+
+spessasynth_lib 4.3.14 — Spessasus
+https://github.com/spessasus/spessasynth_lib
+spessasynth_core 4.3.22 — Spessasus
+https://github.com/spessasus/spessasynth_core
+stb-vorbis 0.0.6 — Spessasus
+https://github.com/spessasus/stb-vorbis
+
+These packages are distributed under the Apache License 2.0. The original license
+files are included alongside this notice. The underlying stb_vorbis.c retains its
+original public-domain dedication. index.js bundles WorkletSynthesizer and its
+dependencies. spessasynth_processor.min.js is from spessasynth_lib 4.3.14.
+
+Pinned source:
+https://github.com/vpavlenko/lego/tree/20db14b8631d07c2aa053822b07a0d41d0a89e1b/dist/vendor/spessasynth

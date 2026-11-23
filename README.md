@@ -53,6 +53,9 @@ It owns the audio element and maps its clock to the score and playback thumb
 using annotated beat positions and recording-time playback spans. The sliders sit in the lower-right
 corner. Use A/D to adjust time spacing and W/S to adjust note height.
 The Piano Legend uses the credited [Salamander piano samples](public/piano/NOTICE.txt).
+Click a score note to hear its transcribed pitch on piano through librawl and
+[SpessaSynth](public/vendor/spessasynth/NOTICE.txt). The audition uses the local
+[GeneralUser GS sound bank](public/assets/soundfonts/GeneralUser-GS-LICENSE.txt).
 
 ## Expressive MIDI
 

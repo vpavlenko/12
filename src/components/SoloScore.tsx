@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { RawlNotation, useTonicRecoloring, type RawlNotationProps, type ScoreRow, type TonicChange } from "librawl";
+import { RawlNotation, useTonicRecoloring, type MidiNote, type RawlNotationProps, type ScoreRow, type TonicChange } from "librawl";
 import { RomanNumeral, ScorePinchContent, useScorePinch } from "librawl/components";
 import { alignScoreRows, PITCH_STEP } from "librawl/geometry";
 import type { NotePlaybackClock } from "librawl/native";
@@ -160,6 +160,7 @@ type Props = {
   onNoteHeightChange: (height: number) => void;
   onTimeSpacingChange: (spacing: number) => void;
   onSeek?: (scoreTime: number) => void;
+  onNoteClick: (note: MidiNote) => void;
 };
 
 type SectionProps = Pick<Props, "score" | "noteHeight" | "timeSpacing" | "onNoteHeightChange" | "onTimeSpacingChange"> & {
@@ -229,7 +230,7 @@ function ScoreSection({
 }
 
 export default function SoloScore({
-  changes, onChangesChange, playback, playbackPosition, onSeek, ...sizing
+  changes, onChangesChange, playback, playbackPosition, onSeek, onNoteClick, ...sizing
 }: Props) {
   const { score, noteHeight } = sizing;
   const scoreContainer = useRef<HTMLDivElement>(null);
@@ -260,6 +261,10 @@ export default function SoloScore({
     playbackClock: playback,
     recoloring,
     onSeek: seek,
+    onNote: (note, event) => {
+      // Librawl also calls this without an event for Shift-hover.
+      if (event) onNoteClick(note);
+    },
     noteScale: noteHeight / PITCH_STEP,
   };
 
