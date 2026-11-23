@@ -149,24 +149,32 @@ function decadeRange(years: number[]) {
   return `${first}..${abbreviated}s`;
 }
 
+function chronologicalEntries(solos: JazzSolo[], startIndex: number, style?: string) {
+  return solos.map((solo, index) => ({
+    solo,
+    index: index + startIndex,
+    year: recordingForSolo(solo.melid)?.recording_year,
+  })).filter(({ solo }) => !style || solo.style === style)
+    .sort((a, b) => (a.year ?? Number.MAX_SAFE_INTEGER) - (b.year ?? Number.MAX_SAFE_INTEGER));
+}
+
 function groupByPerformer(solos: JazzSolo[], startIndex: number, style?: string) {
-  const performers = new Map<string, { solo: JazzSolo; index: number }[]>();
-  const years: number[] = [];
-  solos.forEach((solo, index) => {
-    if (style && solo.style !== style) return;
-    const year = recordingForSolo(solo.melid)?.recording_year;
-    if (year != null) years.push(year);
-    const entries = performers.get(solo.performer) ?? [];
-    entries.push({ solo, index: index + startIndex });
-    performers.set(solo.performer, entries);
-  });
-  return { years: decadeRange(years), performers: [...performers] };
+  const entries = chronologicalEntries(solos, startIndex, style);
+  const performers: { performer: string; entries: typeof entries }[] = [];
+  for (const entry of entries) {
+    const { performer } = entry.solo;
+    const group = performers[performers.length - 1];
+    if (group?.performer === performer) group.entries.push(entry);
+    else performers.push({ performer, entries: [entry] });
+  }
+  return { years: decadeRange(entries.flatMap(({ year }) => year == null ? [] : [year])), performers };
 }
 
 const compositionGroups = Object.entries(STYLES).map(([style, label]) => ({
   style, label, ...groupByPerformer(bluesSolos, 0, style),
 }));
 const rhythmChangesGroup = groupByPerformer(rhythmChangesSolos, FIRST_RHYTHM_CHANGES);
+const bodyAndSoulEntries = chronologicalEntries(bodyAndSoulSolos, FIRST_BODY_AND_SOUL);
 
 function eraForSolo(index: number) {
   return compositionGroups.find(({ style }) => style === solos[index].style) ?? compositionGroups[0];
@@ -289,8 +297,8 @@ function App() {
         <div className="composition-scroll" id="composition-list" ref={compositionScroll}>
           {catalogue !== "bodyAndSoul" && group.years && <b>{group.years}</b>}
           <ul className="composition-performers" role="list">
-            {catalogue !== "bodyAndSoul" ? group.performers.map(([performer, entries]) => (
-              <li key={performer} className="composition-performer">
+            {catalogue !== "bodyAndSoul" ? group.performers.map(({ performer, entries }) => (
+              <li key={entries[0].solo.melid} className="composition-performer">
                 <span className="composition-performer-name">{performer}</span>
                 <ul className="composition-solos" role="list">
                   {entries.map(({ solo, index }) => {
@@ -300,10 +308,10 @@ function App() {
                   })}
                 </ul>
               </li>
-            )) : bodyAndSoulSolos.map((solo, index) => {
+            )) : bodyAndSoulEntries.map(({ solo, index }) => {
               const variant = solo.titleaddon || (solo.solopart > 1 ? solo.solopart : undefined);
               const label = variant ? `${solo.performer} (${variant})` : solo.performer;
-              return soloChoice(solo, FIRST_BODY_AND_SOUL + index, label);
+              return soloChoice(solo, index, label);
             })}
           </ul>
         </div>
