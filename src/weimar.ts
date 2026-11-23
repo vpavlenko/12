@@ -29,6 +29,15 @@ const modulationPickups: Partial<Record<number, Record<number, number>>> = {
   398: { 25: 176981, 41: 177149 },
 };
 
+// Audited approaches to ii in the fourth bar of an A section.
+const aSectionApproaches: Partial<Record<number, { bar: number; beat?: number; pickupEvent?: number }[]>> = {
+  118: [{ bar: 4, beat: 3 }],
+  140: [{ bar: 12, beat: 3 }, { bar: 28, beat: 3 }, { bar: 36 }, { bar: 44, beat: 3 }],
+  206: [{ bar: 36, beat: 2, pickupEvent: 90660 }], // D natural at the start of the chromatic approach.
+  393: [{ bar: 12, beat: 3 }],
+  398: [{ bar: 28, beat: 3 }],
+};
+
 type RelativeMinorPassage = { bar: number; beat?: number; returnBar?: number; returnBeat?: number; returnMeasureBar?: number };
 
 // Source bars for A-section cadences into the relative minor, including repeats.
@@ -59,6 +68,10 @@ export function bodyAndSoulTonality(melid: number, sections: { bar: number; form
       { bar: returnBar, offset: 0, pickupEvent: pickups?.[returnBar] },
     ];
   });
+  for (const approach of aSectionApproaches[melid] ?? []) {
+    // The next bar owns the return, so the approach is editable from this bar.
+    modulations.push({ ...approach, offset: 2 }, { bar: approach.bar + barsPerMeasure, offset: 0 });
+  }
   for (const passage of relativeMinorPassages[melid] ?? []) {
     const { bar, beat, returnBar, returnBeat = 3, returnMeasureBar }: RelativeMinorPassage =
       typeof passage === "number" ? { bar: passage } : passage;
