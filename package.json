@@ -11,7 +11,7 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
-    "librawl": "file:vendor/librawl-0.4.1-local-d92382b44b3c.tgz",
+    "librawl": "file:vendor/librawl-0.4.1-local-424bb5e8bf4b.tgz",
     "papaparse": "^5.4.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
