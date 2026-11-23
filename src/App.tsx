@@ -21,7 +21,7 @@ import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
 import { buildTonalScore, type BeatsItem, type MelodyItem, type ScoreForm } from "./tonalScore";
 import {
-  annotatedSoloIds, barsPerMeasureBySolo, bluesSolos, bodyAndSoulSoloIds, bodyAndSoulSolos, excerptTonalityBySolo,
+  annotatedSoloIds, barsPerMeasureBySolo, bluesSolos, bodyAndSoulSoloIds, bodyAndSoulSolos, bodyAndSoulTonality,
   instrumentName, recordingForSolo, rhythmChangesSoloIds, rhythmChangesSolos, soloKey, solos, type JazzSolo,
 } from "./weimar";
 
@@ -101,7 +101,8 @@ async function loadSoloData(melid: number, fileName: string, signal: AbortSignal
         && (/^\*?[ABC]\d+$/.test(form) || (bar > 0 && /^I\d+$/.test(form))))
       : undefined;
     const formBars = sections?.map(({ bar }) => bar);
-    return { beats, melody: notes, chorusBars: [...choruses.values()], formBars };
+    const excerptTonality = bodyAndSoulSoloIds.has(melid) && sections ? bodyAndSoulTonality(melid, sections) : undefined;
+    return { beats, melody: notes, chorusBars: [...choruses.values()], formBars, excerptTonality };
   }
 
   const [melody, beats] = await Promise.all([
@@ -201,14 +202,13 @@ function App() {
   const solo = solos[selectedSolo];
   const { instrument, melid } = solo;
   const barsPerMeasure = barsPerMeasureBySolo[melid];
-  const excerptTonality = excerptTonalityBySolo[melid];
   const key = soloKey(solo);
   const fileName = makeFileName(solo);
   const soloData = useSoloData(melid, fileName);
   const audio = playbackBySolo[melid]?.audio;
   const score = useMemo(() => soloData?.beats.length
-    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart, { ...soloData, barsPerMeasure, excerptTonality })
-    : undefined, [soloData, key, audio?.scoreStart, barsPerMeasure, excerptTonality]);
+    ? buildTonalScore(soloData.beats, soloData.melody, key, audio?.scoreStart, { ...soloData, barsPerMeasure })
+    : undefined, [soloData, key, audio?.scoreStart, barsPerMeasure]);
   const recording = recordingForSolo(melid);
   const changes = recoloring?.melid === melid ? recoloring.changes : score?.tonicChanges ?? NO_CHANGES;
   const heading = [instrumentName(instrument), recording?.recording_year].filter(Boolean).join(", ");
@@ -339,8 +339,8 @@ function App() {
           />
           {recording && <SoloMetadata key={melid} solo={solo} recording={recording} />}
         </>}
-        <SoloPianoLegend key={melid} tonicKey={excerptTonality?.openingTonic ?? key}
-          score={excerptTonality ? score : undefined} changes={changes} playback={playback} />
+        <SoloPianoLegend key={melid} tonicKey={key}
+          score={score?.tonicChanges.length ? score : undefined} changes={changes} playback={playback} />
       </main>
       <ScoreSizeSliders
         noteHeight={noteHeight}

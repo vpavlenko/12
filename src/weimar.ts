@@ -15,13 +15,29 @@ export const bodyAndSoulSoloIds = new Set(bodyAndSoulSolos.map(({ melid }) => me
 export const rhythmChangesSoloIds = new Set(rhythmChangesSolos.map(({ melid }) => melid));
 export const annotatedSoloIds = new Set([...minorBlues, ...bodyAndSoulSolos, ...rhythmChangesSolos].map(({ melid }) => melid));
 export const barsPerMeasureBySolo: Partial<Record<number, number>> = measureGroups;
-export const excerptTonalityBySolo: Partial<Record<number, ExcerptTonality>> = {
-  // Murray's excerpt starts on Dmaj7, turns to C via Dm7–G7, then returns to the D-flat A.
-  119: {
-    openingTonic: "D",
-    modulations: [{ bar: -3, tonic: "C" }, { bar: 1, tonic: "Db" }],
-  },
+
+// Source event IDs for phrases whose first note anticipates the bridge downbeat.
+const bridgePickups: Partial<Record<number, Record<number, number>>> = {
+  85: { 17: 37272 },
+  96: { 17: 41893, 49: 42221 },
+  206: { 17: 90360, 49: 90870 },
+  220: { 33: 99617 },
 };
+
+export function bodyAndSoulTonality(melid: number, sections: { bar: number; form: string | null }[]): ExcerptTonality {
+  const bridge = /^\*?B\d+$/;
+  const barsPerMeasure = barsPerMeasureBySolo[melid] ?? 1;
+  return {
+    // An excerpt starting with B can include its ii–V pickup.
+    openingOffset: bridge.test(sections[0]?.form ?? "") ? 1 : 0,
+    modulations: sections.flatMap(({ bar, form }) => bridge.test(form ?? "") ? [
+      { bar, offset: 1, pickupEvent: bridgePickups[melid]?.[bar] },
+      { bar: bar + 4 * barsPerMeasure, offset: -1 },
+      { bar: bar + 8 * barsPerMeasure, offset: 0 },
+    ] : []),
+  };
+}
+
 export type WeimarRecording = typeof recordingData[keyof typeof recordingData];
 const weimarRecordings: Record<string, WeimarRecording | undefined> = recordingData;
 
@@ -33,6 +49,8 @@ export function recordingForSolo(melid: number) {
 }
 
 const correctedKeys: Partial<Record<number, string>> = {
+  // Berry's second excerpt returns to D-flat at A3, following its D and C bridge.
+  86: "Db-maj",
   // Redman's 12-bar progression uses D7#9 as I and A7#9 as V.
   245: "D-blues",
 };

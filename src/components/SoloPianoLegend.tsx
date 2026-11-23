@@ -15,8 +15,8 @@ type Props = {
 };
 
 export function SoloPianoLegend({ tonicKey, score, changes, playback }: Props) {
-  const tonic = Note.chroma(tonicKey.split("-")[0]) ?? 0;
-  const [activeTonic, setActiveTonic] = useState(tonic);
+  const tonic = score?.tonic ?? Note.chroma(tonicKey.split("-")[0]) ?? 0;
+  const [activeTonic, setActiveTonic] = useState<number>();
   const player = useMemo(createLegendAudition, []);
   useEffect(() => player.dispose, [player, tonicKey]);
 
@@ -35,7 +35,7 @@ export function SoloPianoLegend({ tonicKey, score, changes, playback }: Props) {
 
   return (
     <FoldablePianoLegend
-      currentTonic={score ? activeTonic : tonic}
+      currentTonic={score ? activeTonic ?? tonic : tonic}
       storageKey="piano-legend"
       onAudition={player.audition}
     />

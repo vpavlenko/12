@@ -4,7 +4,7 @@ import { mod, tonicAt } from "librawl/geometry";
 import { ROMAN_NUMERAL_DEGREES } from "librawl/roman-numerals";
 import { Chord, Interval, Note } from "tonal";
 
-export type MelodyItem = { pitch: number; onset: number; duration: number };
+export type MelodyItem = { pitch: number; onset: number; duration: number; eventid?: number };
 
 export type BeatsItem = {
   bar: number;
@@ -179,11 +179,12 @@ export type ScoreForm = {
   chorusBars?: number[];
   formBars?: number[];
   barsPerMeasure?: number;
+  excerptTonality?: ExcerptTonality;
 };
 
 export type ExcerptTonality = {
-  openingTonic: string;
-  modulations: { bar: number; tonic: string }[];
+  openingOffset: number;
+  modulations: { bar: number; offset: number; pickupEvent?: number }[];
 };
 
 function groupedBar(bar: number, barsPerMeasure: number) {
@@ -203,11 +204,9 @@ function groupMeasures(beats: BeatsItem[], barsPerMeasure: number) {
 
 export function buildTonalScore(
   beats: BeatsItem[], melody: MelodyItem[], key: string, audioStart?: number,
-  { chorusBars: sourceChorusBars = [], formBars: sourceFormBars, barsPerMeasure = 1, excerptTonality }:
-    ScoreForm & { excerptTonality?: ExcerptTonality } = {},
+  { chorusBars: sourceChorusBars = [], formBars: sourceFormBars, barsPerMeasure = 1, excerptTonality }: ScoreForm = {},
 ) {
-  const tonicName = excerptTonality?.openingTonic ?? key.split("-")[0];
-  const tonic = Note.chroma(tonicName) ?? 0;
+  const homeTonic = Note.chroma(key.split("-")[0]) ?? 0;
   const transcribed = melody.filter(({ pitch, onset, duration }) =>
     Number.isFinite(pitch) && Number.isFinite(onset) && Number.isFinite(duration) && duration > EPSILON);
   const firstNote = transcribed.reduce((time, note) => Math.min(time, note.onset), Infinity);
@@ -263,12 +262,22 @@ export function buildTonalScore(
   const firstChorus = measures.find(({ sourceNumber }) => sourceNumber === 1)?.start;
   const hasLongPickup = measures.filter(({ sourceNumber }) => sourceNumber < 1).length > 1;
   const terminalBar = trailingRest >= 0 || (lastMetricBeat.beat === 1 && lastMetricBeat.onset === recordedEndTime) ? end : undefined;
-  const tonicChanges: TonicChange[] = (excerptTonality?.modulations ?? []).flatMap(({ bar, tonic: name }) => {
-    const onset = beats.find((item) => item.bar === bar && item.beat === 1)?.onset;
-    const pitchClass = Note.chroma(name);
-    if (onset === undefined || pitchClass === null || onset < origin || onset >= origin + end) return [];
-    return [{ beat: onset - origin, tonic: pitchClass }];
-  }).sort((a, b) => a.beat - b.beat);
+  let tonic = mod(homeTonic + (excerptTonality?.openingOffset ?? 0));
+  const tonicChanges: TonicChange[] = [];
+  for (const { bar, offset, pickupEvent } of excerptTonality?.modulations ?? []) {
+    const downbeat = beats.find((item) => item.bar === bar && item.beat === 1)?.onset;
+    if (downbeat === undefined) continue;
+    const pitchClass = mod(homeTonic + offset);
+    const pickup = pickupEvent === undefined ? undefined : transcribed.find(({ eventid }) => eventid === pickupEvent);
+    const beat = (pickup?.onset ?? downbeat) - origin;
+    if (beat <= 0) tonic = pitchClass;
+    else if (beat < end && pitchClass !== (tonicChanges[tonicChanges.length - 1]?.tonic ?? tonic)) {
+      tonicChanges.push({
+        beat, tonic: pitchClass,
+        ...(pickup ? { measureBeat: downbeat - origin, onsetOverride: true } : {}),
+      });
+    }
+  }
   const symbols = beats.flatMap(({ chord, onset }) => chord && onset - origin < end ? [{ chord, start: onset - origin }] : []);
   const harmony = symbols.flatMap(({ chord, start }, index) => {
     if (chord === "NC") return [];
