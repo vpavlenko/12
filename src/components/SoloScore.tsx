@@ -208,7 +208,7 @@ function ScoreSection({
         </div>
       </div>}
       <div
-        className="solo-score-scroll"
+        className={showInlineHarmony ? "solo-score-scroll solo-score-scroll-inline" : "solo-score-scroll"}
         ref={containerRef}
         onScroll={(event) => syncHorizontalScroll(event.currentTarget.scrollLeft, harmonyViewportRef.current)}
       >

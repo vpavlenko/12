@@ -13,6 +13,12 @@
   touch-action: pan-x pan-y;
 }
 
+.solo-score-scroll-inline {
+  /* Leave room beside a short final measure for its modulation arrow. */
+  padding-inline-end: 18px;
+  margin-inline-end: -18px;
+}
+
 .solo-score-harmony-viewport {
   overflow: hidden;
   background: #000;

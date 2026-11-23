@@ -184,7 +184,7 @@ export type ScoreForm = {
 
 export type ExcerptTonality = {
   openingOffset: number;
-  modulations: { bar: number; offset: number; pickupEvent?: number }[];
+  modulations: { bar: number; offset: number; beat?: number; pickupEvent?: number }[];
 };
 
 function groupedBar(bar: number, barsPerMeasure: number) {
@@ -264,17 +264,19 @@ export function buildTonalScore(
   const terminalBar = trailingRest >= 0 || (lastMetricBeat.beat === 1 && lastMetricBeat.onset === recordedEndTime) ? end : undefined;
   let tonic = mod(homeTonic + (excerptTonality?.openingOffset ?? 0));
   const tonicChanges: TonicChange[] = [];
-  for (const { bar, offset, pickupEvent } of excerptTonality?.modulations ?? []) {
+  for (const { bar, beat: sourceBeat = 1, offset, pickupEvent } of excerptTonality?.modulations ?? []) {
     const downbeat = beats.find((item) => item.bar === bar && item.beat === 1)?.onset;
     if (downbeat === undefined) continue;
+    const onset = sourceBeat === 1 ? downbeat : beats.find((item) => item.bar === bar && item.beat === sourceBeat)?.onset;
+    if (onset === undefined) continue;
     const pitchClass = mod(homeTonic + offset);
     const pickup = pickupEvent === undefined ? undefined : transcribed.find(({ eventid }) => eventid === pickupEvent);
-    const beat = (pickup?.onset ?? downbeat) - origin;
+    const beat = (pickup?.onset ?? onset) - origin;
     if (beat <= 0) tonic = pitchClass;
     else if (beat < end && pitchClass !== (tonicChanges[tonicChanges.length - 1]?.tonic ?? tonic)) {
       tonicChanges.push({
         beat, tonic: pitchClass,
-        ...(pickup ? { measureBeat: downbeat - origin, onsetOverride: true } : {}),
+        ...(pickup || sourceBeat !== 1 ? { measureBeat: downbeat - origin, onsetOverride: true } : {}),
       });
     }
   }

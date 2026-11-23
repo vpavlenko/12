@@ -28,22 +28,43 @@ const modulationPickups: Partial<Record<number, Record<number, number>>> = {
   398: { 25: 176981, 41: 177149 },
 };
 
+type RelativeMinorPassage = { bar: number; beat?: number; returnBar?: number; returnBeat?: number };
+
+// Source bars for A-section cadences into the relative minor, including repeats.
+const relativeMinorPassages: Partial<Record<number, (number | RelativeMinorPassage)[]>> = {
+  85: [6, 14, 30],
+  96: [6, 14, 38, 46],
+  118: [6, 14, 30],
+  140: [6, 14, 30, 38, 46, 62],
+  206: [6, 14, 30, 38, 46, 62],
+  207: [14],
+  279: [6, 14, { bar: 30, beat: 3 }], // A diminished follows the opening A-flat dominant.
+  367: [6, 14, 30],
+  393: [6, 14, { bar: 30, returnBar: 35, returnBeat: 1 }], // D-flat returns after the closing break.
+  398: [6, 14, 30, 46],
+};
+
 export function bodyAndSoulTonality(melid: number, sections: { bar: number; form: string | null }[]): ExcerptTonality {
   const bridge = /^\*?B\d+$/;
   const barsPerMeasure = barsPerMeasureBySolo[melid] ?? 1;
   const pickups = modulationPickups[melid];
+  const modulations: ExcerptTonality["modulations"] = sections.flatMap(({ bar, form }) => {
+    if (!bridge.test(form ?? "")) return [];
+    const returnBar = bar + 8 * barsPerMeasure;
+    return [
+      { bar, offset: 1, pickupEvent: pickups?.[bar] },
+      { bar: bar + 4 * barsPerMeasure, offset: -1 },
+      { bar: returnBar, offset: 0, pickupEvent: pickups?.[returnBar] },
+    ];
+  });
+  for (const passage of relativeMinorPassages[melid] ?? []) {
+    const { bar, beat, returnBar, returnBeat = 3 }: RelativeMinorPassage = typeof passage === "number" ? { bar: passage } : passage;
+    modulations.push({ bar, beat, offset: -3 }, { bar: returnBar ?? bar + 1, beat: returnBeat, offset: 0 });
+  }
   return {
     // An excerpt starting with B can include its ii–V pickup.
     openingOffset: bridge.test(sections[0]?.form ?? "") ? 1 : 0,
-    modulations: sections.flatMap(({ bar, form }) => {
-      if (!bridge.test(form ?? "")) return [];
-      const returnBar = bar + 8 * barsPerMeasure;
-      return [
-        { bar, offset: 1, pickupEvent: pickups?.[bar] },
-        { bar: bar + 4 * barsPerMeasure, offset: -1 },
-        { bar: returnBar, offset: 0, pickupEvent: pickups?.[returnBar] },
-      ];
-    }),
+    modulations: modulations.sort((a, b) => a.bar - b.bar || (a.beat ?? 1) - (b.beat ?? 1)),
   };
 }
 
