@@ -29,6 +29,8 @@
   min-height: 30px;
   pointer-events: none;
   overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
   color: #aaa;
   font-size: 24px;
   line-height: 1.2;
