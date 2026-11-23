@@ -50,7 +50,12 @@ export function bodyAndSoulTonality(melid: number, sections: { bar: number; form
   const barsPerMeasure = barsPerMeasureBySolo[melid] ?? 1;
   const pickups = modulationPickups[melid];
   const modulations: ExcerptTonality["modulations"] = sections.flatMap(({ bar, form }) => {
-    if (!bridge.test(form ?? "")) return [];
+    const section = form ?? "";
+    if (/^\*?A\d+$/.test(section)) return [
+      { bar: bar + 3 * barsPerMeasure, offset: 2 },
+      { bar: bar + 4 * barsPerMeasure, offset: 0 },
+    ];
+    if (!bridge.test(section)) return [];
     const midpointBar = bar + 4 * barsPerMeasure;
     const returnBar = bar + 8 * barsPerMeasure;
     return [
