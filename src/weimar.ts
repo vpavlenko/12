@@ -16,25 +16,34 @@ export const rhythmChangesSoloIds = new Set(rhythmChangesSolos.map(({ melid }) =
 export const annotatedSoloIds = new Set([...minorBlues, ...bodyAndSoulSolos, ...rhythmChangesSolos].map(({ melid }) => melid));
 export const barsPerMeasureBySolo: Partial<Record<number, number>> = measureGroups;
 
-// Source event IDs for phrases whose first note anticipates the bridge downbeat.
-const bridgePickups: Partial<Record<number, Record<number, number>>> = {
-  85: { 17: 37272 },
+// Source event IDs for pickups into the bridge and the return to A.
+const modulationPickups: Partial<Record<number, Record<number, number>>> = {
+  85: { 17: 37272, 25: 37326 },
   96: { 17: 41893, 49: 42221 },
+  118: { 25: 54497 },
+  140: { 25: 62823 },
   206: { 17: 90360, 49: 90870 },
-  220: { 33: 99617 },
+  220: { 33: 99617, 49: 99723 },
+  393: { 25: 174819 },
+  398: { 25: 176981, 41: 177149 },
 };
 
 export function bodyAndSoulTonality(melid: number, sections: { bar: number; form: string | null }[]): ExcerptTonality {
   const bridge = /^\*?B\d+$/;
   const barsPerMeasure = barsPerMeasureBySolo[melid] ?? 1;
+  const pickups = modulationPickups[melid];
   return {
     // An excerpt starting with B can include its ii–V pickup.
     openingOffset: bridge.test(sections[0]?.form ?? "") ? 1 : 0,
-    modulations: sections.flatMap(({ bar, form }) => bridge.test(form ?? "") ? [
-      { bar, offset: 1, pickupEvent: bridgePickups[melid]?.[bar] },
-      { bar: bar + 4 * barsPerMeasure, offset: -1 },
-      { bar: bar + 8 * barsPerMeasure, offset: 0 },
-    ] : []),
+    modulations: sections.flatMap(({ bar, form }) => {
+      if (!bridge.test(form ?? "")) return [];
+      const returnBar = bar + 8 * barsPerMeasure;
+      return [
+        { bar, offset: 1, pickupEvent: pickups?.[bar] },
+        { bar: bar + 4 * barsPerMeasure, offset: -1 },
+        { bar: returnBar, offset: 0, pickupEvent: pickups?.[returnBar] },
+      ];
+    }),
   };
 }
 
