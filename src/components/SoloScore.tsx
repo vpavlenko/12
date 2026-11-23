@@ -8,6 +8,7 @@ import "librawl/native.css";
 import "librawl/roman-numerals.css";
 import { countInProgressAt, type TonalScore } from "../tonalScore";
 import type { SectionGroup, SectionStarts } from "../soloAnnotations";
+import { measuresWithRhythm, rhythmAt, type RhythmChange } from "../scoreRhythm";
 import "./SoloScore.css";
 
 export const DEFAULT_TIME_SPACING = 25;
@@ -172,6 +173,8 @@ type Props = {
   sectionStarts?: SectionStarts;
   phraseStarts?: number[];
   onPhraseStartsChange: (starts: number[]) => void;
+  rhythmChanges?: RhythmChange[];
+  onRhythmChange: (beat: number, groups: number[]) => void;
   onSectionStartsChange: (group: SectionGroup, starts: number[] | undefined) => void;
   playback: NotePlaybackClock;
   playbackPosition: PlaybackPosition;
@@ -264,7 +267,8 @@ function ScoreSection({
 
 export default function SoloScore({
   changes, onChangesChange, sectionStarts, onSectionStartsChange,
-  phraseStarts: editedPhraseStarts, onPhraseStartsChange, playback, playbackPosition, onSeek, onNoteClick, ...sizing
+  phraseStarts: editedPhraseStarts, onPhraseStartsChange, rhythmChanges, onRhythmChange,
+  playback, playbackPosition, onSeek, onNoteClick, ...sizing
 }: Props) {
   const { score, noteHeight } = sizing;
   const scoreContainer = useRef<HTMLDivElement>(null);
@@ -285,12 +289,20 @@ export default function SoloScore({
     const starts = editedPhraseStarts ?? score.phraseStarts;
     return score.terminalBar === undefined || starts.includes(score.terminalBar) ? starts : [...starts, score.terminalBar];
   }, [score, editedPhraseStarts]);
+  const displayedRhythm = useMemo(() => rhythmChanges?.filter(({ beat }) =>
+    score.measures.some((measure) => measure.start === beat)), [score, rhythmChanges]);
+  const measureMap = useMemo(() => measuresWithRhythm(score.measures, displayedRhythm), [score, displayedRhythm]);
   const seek = (position: number) => (onSeek ?? playback.advance)(score.origin + position);
   const notation: RawlNotationProps = {
     beats: score.end,
     notes: score.notes,
     tonic: score.tonic,
-    measureMap: score.measures,
+    measureMap,
+    rhythmEditing: {
+      getGrouping: (measure) => rhythmAt(displayedRhythm, measure.beat),
+      onBeatsPerMeasure: (measure, beats) => onRhythmChange(measure.beat, [beats]),
+      onRhythmGrouping: (measure, groups) => onRhythmChange(measure.beat, groups),
+    },
     phraseStarts,
     onPhraseStartsChange,
     playbackClock: playback,

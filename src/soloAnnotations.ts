@@ -1,4 +1,5 @@
 import type { TonicChange } from "librawl";
+import { isRhythmGrouping, type RhythmChange } from "./scoreRhythm";
 
 const KEY_PREFIX = "12:solo-annotation:";
 
@@ -12,6 +13,7 @@ export type SoloAnnotation = {
   tonicChanges?: TonicChange[];
   sectionStarts?: SectionStarts;
   phraseStarts?: number[];
+  rhythmChanges?: RhythmChange[];
 };
 
 export function tonicAnnotation(changes: TonicChange[]) {
@@ -43,6 +45,12 @@ function isSectionStarts(value: unknown): value is SectionStarts {
     || (isOrderedStarts(starts) && starts.length > 0));
 }
 
+function isRhythmChanges(value: unknown): value is RhythmChange[] {
+  return Array.isArray(value) && value.every((change, index) =>
+    change != null && Number.isFinite(change.beat) && isRhythmGrouping(change.groups)
+    && (index === 0 || change.beat > value[index - 1].beat));
+}
+
 function parseAnnotation(key: string, json: string) {
   try {
     const saved = JSON.parse(json) as SoloAnnotation | null;
@@ -52,7 +60,8 @@ function parseAnnotation(key: string, json: string) {
       && (!Array.isArray(saved.tonicChanges) || !saved.tonicChanges.every(isTonicChange))) return undefined;
     if (saved.sectionStarts !== undefined && !isSectionStarts(saved.sectionStarts)) return undefined;
     if (saved.phraseStarts !== undefined && !isOrderedStarts(saved.phraseStarts)) return undefined;
-    return saved.tonicChanges !== undefined || saved.sectionStarts || saved.phraseStarts ? saved : undefined;
+    if (saved.rhythmChanges !== undefined && !isRhythmChanges(saved.rhythmChanges)) delete saved.rhythmChanges;
+    return saved.tonicChanges !== undefined || saved.sectionStarts || saved.phraseStarts || saved.rhythmChanges ? saved : undefined;
   } catch {
     return undefined;
   }

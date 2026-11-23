@@ -20,6 +20,7 @@ import { createScoreNoteAudition } from "./components/scoreNoteAudition";
 import { audioTimeAt, type AudioExcerpt } from "./recordingClock";
 import { SoloPianoLegend } from "./components/SoloPianoLegend";
 import { SoloMetadata } from "./components/SoloMetadata";
+import { isRhythmGrouping } from "./scoreRhythm";
 import { readSoloAnnotations, tonicAnnotation, writeSoloAnnotation, type SectionGroup, type SoloAnnotation } from "./soloAnnotations";
 import { buildTonalScore, type BeatsItem, type MelodyItem, type ScoreForm } from "./tonalScore";
 import {
@@ -273,7 +274,7 @@ function App() {
     const current = latestAnnotations.current.get(melid);
     const next: SoloAnnotation = { ...current, version: 1, soloId: melid, scoreOrigin: score.origin };
     edit(next);
-    const saved = next.tonicChanges !== undefined || next.sectionStarts || next.phraseStarts ? next : undefined;
+    const saved = next.tonicChanges !== undefined || next.sectionStarts || next.phraseStarts || next.rhythmChanges ? next : undefined;
     if (JSON.stringify(current) === JSON.stringify(saved)) return;
     const updated = new Map(latestAnnotations.current);
     if (saved) updated.set(melid, saved);
@@ -297,6 +298,14 @@ function App() {
     const phrases = starts.filter((beat) => beat !== score.terminalBar);
     updateAnnotation((annotation) => {
       annotation.phraseStarts = JSON.stringify(phrases) === JSON.stringify(score.phraseStarts) ? undefined : phrases;
+    });
+  }
+
+  function commitRhythmChange(beat: number, groups: number[]) {
+    if (!score?.measures.some((measure) => measure.start === beat) || !isRhythmGrouping(groups)) return;
+    updateAnnotation((annotation) => {
+      const changes = annotation.rhythmChanges?.filter((change) => change.beat !== beat) ?? [];
+      annotation.rhythmChanges = [...changes, { beat, groups }].sort((a, b) => a.beat - b.beat);
     });
   }
 
@@ -397,6 +406,8 @@ function App() {
             onSectionStartsChange={commitSectionStarts}
             phraseStarts={phraseStarts}
             onPhraseStartsChange={commitPhraseStarts}
+            rhythmChanges={annotation?.rhythmChanges}
+            onRhythmChange={commitRhythmChange}
             playback={playback}
             playbackPosition={playbackPosition}
             onNoteClick={audition.play}
