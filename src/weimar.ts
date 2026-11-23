@@ -28,7 +28,7 @@ const modulationPickups: Partial<Record<number, Record<number, number>>> = {
   398: { 25: 176981, 41: 177149 },
 };
 
-type RelativeMinorPassage = { bar: number; beat?: number; returnBar?: number; returnBeat?: number };
+type RelativeMinorPassage = { bar: number; beat?: number; returnBar?: number; returnBeat?: number; returnMeasureBar?: number };
 
 // Source bars for A-section cadences into the relative minor, including repeats.
 const relativeMinorPassages: Partial<Record<number, (number | RelativeMinorPassage)[]>> = {
@@ -41,7 +41,7 @@ const relativeMinorPassages: Partial<Record<number, (number | RelativeMinorPassa
   279: [6, 14, { bar: 30, beat: 3 }], // A diminished follows the opening A-flat dominant.
   367: [6, 14, 30],
   393: [6, 14, { bar: 30, returnBar: 35, returnBeat: 1 }], // D-flat returns after the closing break.
-  398: [6, 14, 30, 46],
+  398: [6, 14, 30, { bar: 46, returnMeasureBar: 47 }], // The cadenza resolves inside the final bar.
 };
 
 export function bodyAndSoulTonality(melid: number, sections: { bar: number; form: string | null }[]): ExcerptTonality {
@@ -58,8 +58,14 @@ export function bodyAndSoulTonality(melid: number, sections: { bar: number; form
     ];
   });
   for (const passage of relativeMinorPassages[melid] ?? []) {
-    const { bar, beat, returnBar, returnBeat = 3 }: RelativeMinorPassage = typeof passage === "number" ? { bar: passage } : passage;
-    modulations.push({ bar, beat, offset: -3 }, { bar: returnBar ?? bar + 1, beat: returnBeat, offset: 0 });
+    const { bar, beat, returnBar, returnBeat = 3, returnMeasureBar }: RelativeMinorPassage =
+      typeof passage === "number" ? { bar: passage } : passage;
+    const returnOnsetBar = returnBar ?? bar + 1;
+    modulations.push(
+      { bar, beat, offset: -3, measureBar: beat === undefined ? undefined : bar + 1 },
+      { bar: returnOnsetBar, beat: returnBeat, offset: 0,
+        measureBar: returnBeat === 1 ? undefined : returnMeasureBar ?? returnOnsetBar + 1 },
+    );
   }
   return {
     // An excerpt starting with B can include its ii–V pickup.
